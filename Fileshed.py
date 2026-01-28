@@ -5193,16 +5193,19 @@ class Tools:
         Extracts a ZIP archive using Python zipfile (builtin, no external dependency).
         Works in Storage or Documents zones.
 
-        :param zone: Destination zone for extraction ("storage" or "documents")
-        :param src: Path to ZIP file (relative to src_zone or zone if src_zone is empty)
+        :param zone: Destination zone for extraction (Storage or Documents)
+        :param src: Path to ZIP file (relative to src_zone, or zone if src_zone is empty)
         :param dest: Destination folder (relative to zone). Empty = same folder as ZIP
-        :param src_zone: Source zone where ZIP is located ("uploads", "storage", or "documents"). Empty = use zone
+        :param src_zone: Source zone where ZIP is located (Uploads, Storage, or Documents). Empty = same as zone
         :return: List of extracted files as JSON
 
         Example:
             shed_unzip(zone="storage", src="downloads/repo.zip", dest="projects/repo")
             shed_unzip(zone="storage", src="archive.zip", dest="extracted", src_zone="uploads")
         """
+        # Canonical zone names (with capital)
+        ZONE_NAMES = {"uploads": "Uploads", "storage": "Storage", "documents": "Documents"}
+
         try:
             user_root = self._core._get_user_root(__user__)
             zone_lower = zone.lower()
@@ -5213,8 +5216,9 @@ class Tools:
                     "ZONE_FORBIDDEN",
                     f"Zone '{zone}' not allowed for unzip destination",
                     {"zone": zone},
-                    "Use 'storage' or 'documents'"
+                    "Use Storage or Documents"
                 )
+            zone_name = ZONE_NAMES[zone_lower]
 
             # Get destination zone path
             if zone_lower == "storage":
@@ -5231,8 +5235,9 @@ class Tools:
                     "ZONE_FORBIDDEN",
                     f"Source zone '{src_zone}' not allowed",
                     {"src_zone": src_zone},
-                    "Use 'uploads', 'storage', or 'documents'"
+                    "Use Uploads, Storage, or Documents"
                 )
+            src_zone_name = ZONE_NAMES[src_zone_lower]
 
             # Get source zone path
             if src_zone_lower == "uploads":
@@ -5307,7 +5312,7 @@ class Tools:
             if zone_lower == "documents":
                 docs_data = user_root / "Documents" / "data"
                 self._core._git_run(["add", "-A"], cwd=docs_data)
-                src_info = f"{src_zone_lower}:{src}" if src_zone_lower != zone_lower else src
+                src_info = f"{src_zone_name}:{src}" if src_zone_lower != zone_lower else src
                 self._core._git_run(
                     ["commit", "-m", f"Extracted {src_info} to {dest or 'same folder'}", "--allow-empty"],
                     cwd=docs_data
@@ -5317,14 +5322,14 @@ class Tools:
                 True,
                 data={
                     "source": src,
-                    "source_zone": src_zone_lower,
+                    "source_zone": src_zone_name,
                     "destination": str(dest_path.relative_to(zone_root)),
-                    "destination_zone": zone_lower,
+                    "destination_zone": zone_name,
                     "files_count": len(extracted_files),
                     "files": extracted_files[:50],  # Limit to first 50
                     "truncated": len(extracted_files) > 50,
                 },
-                message=f"Extracted {len(extracted_files)} files from {src_zone_lower} to {zone_lower}"
+                message=f"Extracted {len(extracted_files)} files from {src_zone_name} to {zone_name}"
             )
             
         except StorageError as e:
