@@ -18,7 +18,7 @@ Fileshed gives your LLM a persistent workspace. It provides:
 
 - 📂 **Persistent storage** — Files survive across conversations
 - 🗃️ **Structured data** — Built-in SQLite databases, surgical file edits by line or pattern
-- 🔄 **Convert data** — ffmpeg for media, pandoc to create LaTeX and PDF
+- 🔄 **Convert data** — ffmpeg for media, pandoc for document conversion (markdown, docx, html, LaTeX source...)
 - 📝 **Examine and modify files** — cat, touch, mkdir, rm, cp, mv, tar, gzip, zip, xxd... Work in text and binary mode
 - 🛡️ **Integrity** — Automatic Git versioning, safe editing with file locks
 - 🌐 **Network I/O** (optional) — Download files and clone repositories (disabled by default, admin-controlled)
@@ -35,7 +35,7 @@ Fileshed gives your LLM a persistent workspace. It provides:
 - 💾 **Remember things** — Save scripts, notes, configs for future conversations
 - 📊 **Analyze data** — Query CSVs and databases without loading them into context
 - 🎬 **Process media** — Convert videos, resize images, extract audio
-- 📄 **Generate documents** — Create PDFs, LaTeX reports, markdown docs
+- 📄 **Generate documents** — Create Word documents, LaTeX source, markdown, HTML (PDF requires optional tools)
 - 🔧 **Build projects** — Maintain code, configs, and data across sessions
 - 👥 **Collaborate** — Share files with your team in group workspaces
 - 📦 **Package & deliver** — Create archives and download links for users
@@ -57,7 +57,7 @@ Fileshed gives your LLM a persistent workspace. It provides:
 > 
 > **LLM:** ✅ Downloaded countries.json, imported to SQLite, here are the top 10...
 
-> **You:** "Take the PDF I uploaded and convert it to Word"
+> **You:** "Convert my markdown report to Word format"
 > 
 > **LLM:** ✅ Converted! [Download report.docx]
 
@@ -441,6 +441,26 @@ shed_patch_text(zone="storage", path="projects/2024/.keep", content="")
 - **Command whitelist**: Only approved commands allowed
 - **Network disabled by default**: Admin must enable
 - **Quotas**: Storage limits per user and group
+
+---
+
+## Optional Dependencies
+
+Some features require additional tools installed in the Open WebUI container:
+
+| Feature | Required tool | Package |
+|---------|---------------|---------|
+| PDF generation | `pdflatex` or `tectonic` | `texlive-latex-base` or `tectonic` |
+| PDF to text | `pdftotext` | `poppler-utils` |
+| HTML to PDF | `wkhtmltopdf` | `wkhtmltopdf` |
+| Image manipulation | `convert` | `imagemagick` |
+
+> 💡 Check what's available with `shed_allowed_commands()`
+
+**Without these tools, you can still:**
+- Convert between markdown, docx, html, LaTeX source (via pandoc)
+- Process media with ffmpeg
+- Use all 37 Fileshed functions
 
 ---
 
