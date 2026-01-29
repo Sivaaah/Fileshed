@@ -5318,29 +5318,19 @@ class Tools:
                     cwd=docs_data
                 )
 
-            # Build response
-            response_data = {
-                "source": src,
-                "source_zone": src_zone_name,
-                "destination": str(dest_path.relative_to(zone_root)),
-                "destination_zone": zone_name,
-                "files_count": len(extracted_files),
-                "files": extracted_files[:50],  # Limit to first 50
-                "truncated": len(extracted_files) > 50,
-            }
-
-            message = f"Extracted {len(extracted_files)} files from {src_zone_name} to {zone_name}"
-
-            # Warning if source is Uploads
-            if src_zone_lower == "uploads":
-                response_data["warning"] = (
-                    f"The source ZIP '{src}' remains in Uploads. "
-                    "Uploads files are NOT deleted when the conversation is deleted. "
-                    "Use shed_delete(zone='uploads', path='...') to remove it."
-                )
-                message += f". WARNING: {response_data['warning']}"
-
-            return self._core._format_response(True, data=response_data, message=message)
+            return self._core._format_response(
+                True,
+                data={
+                    "source": src,
+                    "source_zone": src_zone_name,
+                    "destination": str(dest_path.relative_to(zone_root)),
+                    "destination_zone": zone_name,
+                    "files_count": len(extracted_files),
+                    "files": extracted_files[:50],  # Limit to first 50
+                    "truncated": len(extracted_files) > 50,
+                },
+                message=f"Extracted {len(extracted_files)} files from {src_zone_name} to {zone_name}"
+            )
             
         except StorageError as e:
             return self._core._format_error(e, "shed_unzip")
