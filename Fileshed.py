@@ -1529,17 +1529,16 @@ shed_exec(zone="storage", cmd="git", args=["clone", "https://github.com/user/rep
 
 The `zone` parameter already specifies WHERE to operate. The path in `args` is RELATIVE to that zone.
 
-**If you include the zone name in the path, you'll create a DUPLICATE folder!**
+**Fileshed automatically rejects paths that start with the zone name** (error code: PATH_STARTS_WITH_ZONE).
 
 ### Example of the mistake
 
 User asks: "In Documents, create a folder MyProject"
 
 ```
-❌ WRONG (creates Documents/Documents/MyProject):
+❌ REJECTED (would create Documents/Documents/MyProject):
 shed_exec(zone="Documents", cmd="mkdir", args=["-p", "Documents/MyProject"])
-                                                     ^^^^^^^^^^
-                                                     This creates an unwanted "Documents" subfolder!
+→ Error: PATH_STARTS_WITH_ZONE
 
 ✅ CORRECT (creates Documents/MyProject):
 shed_exec(zone="Documents", cmd="mkdir", args=["-p", "MyProject"])
@@ -1556,14 +1555,29 @@ The zone parameter already points to the Documents folder:
 
 ```
 ✅ CORRECT: shed_exec(zone="storage", cmd="cat", args=["projects/file.txt"])
-❌ WRONG:   shed_exec(zone="storage", cmd="cat", args=["Storage/projects/file.txt"])
+❌ REJECTED: shed_exec(zone="storage", cmd="cat", args=["Storage/projects/file.txt"])
 
 ✅ CORRECT: shed_exec(zone="documents", cmd="ls", args=["reports"])
-❌ WRONG:   shed_exec(zone="documents", cmd="ls", args=["Documents/reports"])
+❌ REJECTED: shed_exec(zone="documents", cmd="ls", args=["Documents/reports"])
 
 ✅ CORRECT: shed_exec(zone="documents", cmd="mkdir", args=["-p", "Projects/2024"])
-❌ WRONG:   shed_exec(zone="documents", cmd="mkdir", args=["-p", "Documents/Projects/2024"])
+❌ REJECTED: shed_exec(zone="documents", cmd="mkdir", args=["-p", "Documents/Projects/2024"])
 ```
+
+## Exception: allow_zone_in_path
+
+In rare cases where the user explicitly wants a subfolder named after the zone
+(e.g., a "Storage" folder inside Storage), use the `allow_zone_in_path` parameter:
+
+```
+# User explicitly wants: Storage/Storage/backup/
+shed_exec(zone="storage", cmd="mkdir", args=["-p", "Storage/backup"], allow_zone_in_path=True)
+```
+
+This parameter is available on: `shed_exec`, `shed_patch_text`, `shed_patch_bytes`,
+`shed_delete`, `shed_rename`, and all `shed_lockedit_*` functions.
+
+**Only use this when the user explicitly confirms they want a subfolder with that name.**
 
 ## Zone roots
 
@@ -4544,24 +4558,26 @@ class Tools:
         zone: str,
         path: str,
         group: str = None,
+        allow_zone_in_path: bool = False,
         __user__: dict = {},
         __metadata__: dict = {},
     ) -> str:
         """
         Open a file for safe editing (locks file, creates working copy).
-        
+
         ⚠️ COMPLETE WORKFLOW (must follow all steps):
         1. shed_lockedit_open(zone, path)         → Lock file, get content
         2. shed_lockedit_overwrite(zone, path, content)  → Modify (NOT shed_patch_text!)
         3. shed_lockedit_save(zone, path)         → Save + unlock (CLOSES edit mode!)
-        
+
         OR to cancel: shed_lockedit_cancel(zone, path)  → Discard changes + unlock
-        
+
         :param zone: Target zone ("storage", "documents", or "group")
-        :param path: File path to edit
+        :param path: File path to edit (relative to zone, don't include zone name!)
         :param group: Group name/ID (required if zone="group")
+        :param allow_zone_in_path: Allow path starting with zone name (default: False)
         :return: File content and lock info as JSON
-        
+
         Examples:
             shed_lockedit_open(zone="storage", path="config.json")
             shed_lockedit_open(zone="documents", path="report.md")
@@ -4569,8 +4585,8 @@ class Tools:
         """
         try:
             ctx = self._core._resolve_zone(zone, group, __user__, __metadata__, require_write=True)
-            
-            path = self._core._validate_relative_path(path)
+
+            path = self._core._validate_relative_path(path, ctx.zone_name, allow_zone_in_path)
             target = self._core._resolve_chroot_path(ctx.zone_root, path)
             
             if not target.exists():
@@ -4626,28 +4642,30 @@ class Tools:
         args: list = [],
         timeout: int = None,
         group: str = None,
+        allow_zone_in_path: bool = False,
         __user__: dict = {},
         __metadata__: dict = {},
     ) -> str:
         """
         Execute a command on file in editzone (working copy).
-        
+
         :param zone: Target zone ("storage", "documents", or "group")
-        :param path: File path (must be opened with shed_lockedit_open)
+        :param path: File path (must be opened with shed_lockedit_open, relative to zone)
         :param cmd: Command to execute
         :param args: Command arguments (use "." for the file being edited)
         :param timeout: Timeout in seconds
         :param group: Group name/ID (required if zone="group")
+        :param allow_zone_in_path: Allow path starting with zone name (default: False)
         :return: Command output as JSON
-        
+
         Examples:
             shed_lockedit_exec(zone="storage", path="data.txt", cmd="sed", args=["-i", "s/old/new/g", "."])
             shed_lockedit_exec(zone="storage", path="code.py", cmd="cat", args=["."])
         """
         try:
             ctx = self._core._resolve_zone(zone, group, __user__, __metadata__, require_write=True)
-            
-            path = self._core._validate_relative_path(path)
+
+            path = self._core._validate_relative_path(path, ctx.zone_name, allow_zone_in_path)
             user_id = __user__.get("id", "")
             
             # Verify lock ownership
@@ -4695,30 +4713,32 @@ class Tools:
         content: str,
         append: bool = False,
         group: str = None,
+        allow_zone_in_path: bool = False,
         __user__: dict = {},
         __metadata__: dict = {},
     ) -> str:
         """
         Write content to file in editzone (working copy).
-        
+
         ⚠️ REQUIRES: File must be opened first with shed_lockedit_open()
         ⚠️ DO NOT use position, pattern, line, overwrite params - those are for shed_patch_text!
-        
+
         :param zone: Target zone ("storage", "documents", or "group")
-        :param path: File path (must be opened with shed_lockedit_open)
+        :param path: File path (must be opened with shed_lockedit_open, relative to zone)
         :param content: Content to write (replaces entire file by default)
         :param append: If True, append instead of replace
         :param group: Group name/ID (required if zone="group")
+        :param allow_zone_in_path: Allow path starting with zone name (default: False)
         :return: Write result as JSON
-        
+
         Examples:
             shed_lockedit_overwrite(zone="storage", path="config.json", content='{"key": "value"}')
             shed_lockedit_overwrite(zone="storage", path="log.txt", content="New entry\\n", append=True)
         """
         try:
             ctx = self._core._resolve_zone(zone, group, __user__, __metadata__, require_write=True)
-            
-            path = self._core._validate_relative_path(path)
+
+            path = self._core._validate_relative_path(path, ctx.zone_name, allow_zone_in_path)
             user_id = __user__.get("id", "")
             
             # Verify lock ownership
@@ -4761,31 +4781,33 @@ class Tools:
         path: str,
         group: str = None,
         message: str = None,
+        allow_zone_in_path: bool = False,
         __user__: dict = {},
         __metadata__: dict = {},
     ) -> str:
         """
         Save edited file back to zone and release lock.
-        
+
         ⚠️ THIS CLOSES EDIT MODE! After save, the file is unlocked.
         To edit again, you must call shed_lockedit_open() first.
-        
+
         Workflow: shed_lockedit_open → shed_lockedit_overwrite → shed_lockedit_save (done!)
-        
+
         :param zone: Target zone ("storage", "documents", or "group")
-        :param path: File path
+        :param path: File path (relative to zone, don't include zone name!)
         :param group: Group name/ID (required if zone="group")
         :param message: Git commit message (documents/group only)
+        :param allow_zone_in_path: Allow path starting with zone name (default: False)
         :return: Save result as JSON
-        
+
         Examples:
             shed_lockedit_save(zone="storage", path="config.json")
             shed_lockedit_save(zone="documents", path="report.md", message="Final version")
         """
         try:
             ctx = self._core._resolve_zone(zone, group, __user__, __metadata__, require_write=True)
-            
-            path = self._core._validate_relative_path(path)
+
+            path = self._core._validate_relative_path(path, ctx.zone_name, allow_zone_in_path)
             user_id = __user__.get("id", "")
             
             # Verify lock ownership
@@ -4839,24 +4861,26 @@ class Tools:
         zone: str,
         path: str,
         group: str = None,
+        allow_zone_in_path: bool = False,
         __user__: dict = {},
         __metadata__: dict = {},
     ) -> str:
         """
         Cancel editing and release lock (discards changes).
-        
+
         :param zone: Target zone ("storage", "documents", or "group")
-        :param path: File path
+        :param path: File path (relative to zone, don't include zone name!)
         :param group: Group name/ID (required if zone="group")
+        :param allow_zone_in_path: Allow path starting with zone name (default: False)
         :return: Cancel result as JSON
-        
+
         Examples:
             shed_lockedit_cancel(zone="storage", path="config.json")
         """
         try:
             ctx = self._core._resolve_zone(zone, group, __user__, __metadata__, require_write=True)
-            
-            path = self._core._validate_relative_path(path)
+
+            path = self._core._validate_relative_path(path, ctx.zone_name, allow_zone_in_path)
             user_id = __user__.get("id", "")
             
             # Verify lock ownership
@@ -8055,18 +8079,20 @@ shed_tree(zone="storage") # Directory tree
         dest_path: str,
         message: str = "Add file to group",
         mode: str = None,
+        allow_zone_in_path: bool = False,
         __user__: dict = {},
         __metadata__: dict = {},
     ) -> str:
         """
         Copies a file from personal space to group.
-        
+
         :param src_zone: Source zone ('uploads', 'storage', or 'documents')
-        :param src_path: Source file path
+        :param src_path: Source file path (relative to src_zone, don't include zone name!)
         :param group: Target group ID
-        :param dest_path: Destination path in group
+        :param dest_path: Destination path in group (don't include zone name!)
         :param message: Git commit message
         :param mode: Write mode: 'owner', 'group', or 'owner_ro' (default from config)
+        :param allow_zone_in_path: Allow paths starting with zone name (default: False)
         :return: Operation result as JSON
         """
         try:
@@ -8075,27 +8101,30 @@ shed_tree(zone="storage") # Directory tree
             self._core._check_group_access(__user__, group)
             user_id = __user__.get("id", "")
             conv_id = self._core._get_conv_id(__metadata__)
-            
-            # Validate paths
-            src_path = self._core._validate_relative_path(src_path)
-            dest_path = self._core._validate_relative_path(dest_path)
-            
-            # Resolve source
+
+            # Resolve source zone first to get zone_name for validation
             user_root = self._core._get_user_root(__user__)
             src_zone_lower = src_zone.lower()
-            
+
             if src_zone_lower == "uploads":
                 src_base = user_root / "Uploads" / conv_id
+                src_zone_name = "Uploads"
             elif src_zone_lower == "storage":
                 src_base = user_root / "Storage" / "data"
+                src_zone_name = "Storage"
             elif src_zone_lower == "documents":
                 src_base = user_root / "Documents" / "data"
+                src_zone_name = "Documents"
             else:
                 raise StorageError(
                     "ZONE_FORBIDDEN",
                     f"Invalid source zone: {src_zone}",
                     hint="Use 'uploads', 'storage', or 'documents'"
                 )
+
+            # Validate paths with zone name check
+            src_path = self._core._validate_relative_path(src_path, src_zone_name, allow_zone_in_path)
+            dest_path = self._core._validate_relative_path(dest_path, f"group:{group}", allow_zone_in_path)
             
             source = self._core._resolve_chroot_path(src_base, src_path)
             
