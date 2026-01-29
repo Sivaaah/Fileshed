@@ -1864,17 +1864,26 @@ shed_exec(zone="storage", cmd="some_cmd", args=["..."],
         
         return target
 
-    def _validate_relative_path(self, path: str) -> str:
+    def _validate_relative_path(
+        self,
+        path: str,
+        zone_name: str = None,
+        allow_zone_in_path: bool = False
+    ) -> str:
         """
         Validates that a relative path contains no traversal.
         Returns the cleaned and normalized path.
+
+        :param path: The path to validate
+        :param zone_name: If provided, checks that path doesn't start with zone name
+        :param allow_zone_in_path: If True, allows path to start with zone name
         """
         # Normalize Unicode to NFC (prevents path confusion attacks)
         path = unicodedata.normalize("NFC", path)
-        
+
         # Clean
         path = path.lstrip("/")
-        
+
         # Block absolute paths
         if path.startswith("/"):
             raise StorageError(
@@ -1883,7 +1892,7 @@ shed_exec(zone="storage", cmd="some_cmd", args=["..."],
                 {"path": path},
                 "Use only relative paths"
             )
-        
+
         # Block .. that escapes current directory
         # Virtually resolve the path to check
         parts = []
@@ -1899,8 +1908,27 @@ shed_exec(zone="storage", cmd="some_cmd", args=["..."],
                 parts.pop()
             elif part and part != ".":
                 parts.append(part)
-        
-        return "/".join(parts) if parts else ""
+
+        cleaned_path = "/".join(parts) if parts else ""
+
+        # Check if path starts with zone name (common LLM mistake)
+        if zone_name and not allow_zone_in_path and parts:
+            # Zone names to check (case-insensitive): Storage, Documents, Uploads
+            # For groups, zone_name is like "group:team-name", we extract just "group"
+            zone_check = zone_name.split(":")[0].lower()
+            first_part_lower = parts[0].lower()
+
+            if first_part_lower == zone_check:
+                raise StorageError(
+                    "PATH_STARTS_WITH_ZONE",
+                    f"Path '{cleaned_path}' starts with zone name '{parts[0]}'",
+                    {"zone": zone_name, "path": cleaned_path, "first_component": parts[0]},
+                    f"The zone parameter already sets the working directory. "
+                    f"Use '{'/'.join(parts[1:])}' instead of '{cleaned_path}'. "
+                    f"If you really want a subfolder named '{parts[0]}', add allow_zone_in_path=True"
+                )
+
+        return cleaned_path
 
     def _validate_group_id(self, group_id: str) -> str:
         """
@@ -2220,57 +2248,77 @@ shed_exec(zone="storage", cmd="some_cmd", args=["..."],
                     "This zone is read-only"
                 )
 
-    def _validate_path_args(self, args: list, chroot: Path, cmd: str = "") -> list:
+    def _is_expression_not_path(self, arg: str, cmd: str) -> bool:
+        """
+        Determines if an argument is a regex expression rather than a path.
+        Used for sed/grep/awk commands where /pattern/ syntax is common.
+        """
+        # Commands that use /pattern/ expressions
+        expression_commands = {"sed", "grep", "egrep", "fgrep", "awk", "perl"}
+
+        if cmd not in expression_commands or not arg.startswith("/"):
+            return False
+
+        # Clear expression indicators:
+        # - Contains space: "/Team: Eng/a new line"
+        # - Contains colon: "/Team: Eng/"
+        # - Ends with /: "/pattern/"
+        if " " in arg:
+            return True
+        if ":" in arg:
+            return True
+        if arg.endswith("/"):
+            return True
+
+        if len(arg) > 2:
+            # Check for /pattern/X format where X is a single sed command
+            # Valid: /foo/d, /bar/p, /baz/a text
+            # Invalid: /etc/passwd (passwd is not a single letter)
+            second_slash = arg.find("/", 1)
+            if second_slash > 0 and second_slash < len(arg) - 1:
+                after_slash = arg[second_slash + 1:]
+                # Must be a single sed command letter, alone or followed by space/text
+                if len(after_slash) == 1 and after_slash in "acdipqswy":
+                    return True
+                if len(after_slash) > 1 and after_slash[0] in "acdipqswy" and after_slash[1] in " \t/":
+                    return True
+
+        return False
+
+    def _validate_path_args(
+        self,
+        args: list,
+        chroot: Path,
+        cmd: str = "",
+        zone_name: str = None,
+        allow_zone_in_path: bool = False
+    ) -> list:
         """
         Validates that arguments don't allow escaping the chroot.
         Blocks: absolute paths and .. that escape chroot.
-        
-        For sed/grep/awk, expressions starting with / are NOT treated as paths,
-        but only if they look like expressions (contain space, :, or end with /).
+
+        For sed/grep/awk, expressions starting with / are NOT treated as paths.
+
+        :param args: List of command arguments
+        :param chroot: The zone root path
+        :param cmd: The command being executed
+        :param zone_name: If provided, checks that paths don't start with zone name
+        :param allow_zone_in_path: If True, allows paths to start with zone name
         """
         chroot_resolved = chroot.resolve()
-        
-        # Commands that use /pattern/ expressions
-        expression_commands = {"sed", "grep", "egrep", "fgrep", "awk", "perl"}
-        
+
         for arg in args:
             arg_str = str(arg)
-            
+
             # Skip flags (like -i, -e, -n, etc.)
             if arg_str.startswith("-"):
                 continue
-            
-            # For expression-based commands, detect expressions vs paths
-            if cmd in expression_commands and arg_str.startswith("/"):
-                # Clear expression indicators:
-                # - Contains space: "/Team: Eng/a new line"
-                # - Contains colon: "/Team: Eng/"  
-                # - Ends with /: "/pattern/"
-                is_expression = False
-                
-                if " " in arg_str:
-                    is_expression = True
-                elif ":" in arg_str:
-                    is_expression = True
-                elif arg_str.endswith("/"):
-                    is_expression = True
-                elif len(arg_str) > 2:
-                    # Check for /pattern/X format where X is a single sed command
-                    # Valid: /foo/d, /bar/p, /baz/a text
-                    # Invalid: /etc/passwd (passwd is not a single letter)
-                    second_slash = arg_str.find("/", 1)
-                    if second_slash > 0 and second_slash < len(arg_str) - 1:
-                        after_slash = arg_str[second_slash + 1:]
-                        # Must be a single sed command letter, alone or followed by space/text
-                        if len(after_slash) == 1 and after_slash in "acdipqswy":
-                            is_expression = True
-                        elif len(after_slash) > 1 and after_slash[0] in "acdipqswy" and after_slash[1] in " \t/":
-                            is_expression = True
-                
-                if is_expression:
-                    continue
-            
-            # Block absolute paths
+
+            # Skip regex expressions for sed/grep/awk
+            if self._is_expression_not_path(arg_str, cmd):
+                continue
+
+            # Block absolute paths (that aren't expressions)
             if arg_str.startswith("/"):
                 raise StorageError(
                     "PATH_ESCAPE",
@@ -2278,8 +2326,12 @@ shed_exec(zone="storage", cmd="some_cmd", args=["..."],
                     {"path": arg_str},
                     "Use only relative paths"
                 )
-            
-            # Verify .. doesn't escape chroot
+
+            # Use _validate_relative_path for standard validation + zone prefix check
+            # This validates: Unicode normalization, .., and zone prefix
+            self._validate_relative_path(arg_str, zone_name, allow_zone_in_path)
+
+            # Additional chroot escape check with resolved paths
             if ".." in arg_str:
                 try:
                     target = (chroot / arg_str).resolve()
@@ -2291,7 +2343,7 @@ shed_exec(zone="storage", cmd="some_cmd", args=["..."],
                         {"path": arg_str, "chroot": str(chroot)},
                         "Resolved path escapes allowed zone"
                     )
-        
+
         return list(args)
 
     def _validate_git_command(self, args: list) -> None:
@@ -3415,6 +3467,7 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
         group: str,
         message: str,
         mode: str,
+        allow_zone_in_path: bool,
         __user__: dict,
         __metadata__: dict,
     ) -> str:
@@ -3422,19 +3475,22 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
         user_id = __user__.get("id", "")
         conv_id = self._get_conv_id(__metadata__)
         zone_lower = zone.lower()
-        
+
         # === ZONE RESOLUTION ===
         user_root = self._get_user_root(__user__)
         git_commit = False
         group_id = None
-        
+        zone_name = None  # For zone prefix validation
+
         if zone_lower == "storage":
             zone_root = user_root / "Storage" / "data"
             editzone_base = user_root / "Storage"
+            zone_name = "Storage"
         elif zone_lower == "documents":
             zone_root = user_root / "Documents" / "data"
             editzone_base = user_root / "Documents"
             git_commit = True
+            zone_name = "Documents"
             self._init_git_repo(zone_root)
         elif zone_lower == "group":
             if not group:
@@ -3444,11 +3500,12 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
             zone_root = self._ensure_group_space(group_id)
             editzone_base = self._get_groups_root() / group_id
             git_commit = True
+            zone_name = f"group:{group_id}"
         else:
             raise StorageError("ZONE_FORBIDDEN", f"Invalid zone: {zone}")
-        
+
         self._ensure_dir(zone_root)
-        path = self._validate_relative_path(path)
+        path = self._validate_relative_path(path, zone_name, allow_zone_in_path)
         target_path = self._resolve_chroot_path(zone_root, path)
         
         # === PERMISSION CHECK (groups) ===
@@ -3692,16 +3749,17 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
         group: str,
         message: str,
         mode: str,
+        allow_zone_in_path: bool,
         __user__: dict,
         __metadata__: dict,
     ) -> str:
         """Internal implementation for binary file patching."""
         import base64 as base64_module
-        
+
         user_id = __user__.get("id", "")
         conv_id = self._get_conv_id(__metadata__)
         zone_lower = zone.lower()
-        
+
         # === PARSE CONTENT ===
         try:
             if content_format == "hex":
@@ -3717,19 +3775,22 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
                 raise StorageError("INVALID_PARAMETER", f"Invalid content_format: {content_format}")
         except ValueError as e:
             raise StorageError("INVALID_PARAMETER", f"Invalid content: {e}")
-        
+
         # === ZONE RESOLUTION ===
         user_root = self._get_user_root(__user__)
         git_commit = False
         group_id = None
-        
+        zone_name = None  # For zone prefix validation
+
         if zone_lower == "storage":
             zone_root = user_root / "Storage" / "data"
             editzone_base = user_root / "Storage"
+            zone_name = "Storage"
         elif zone_lower == "documents":
             zone_root = user_root / "Documents" / "data"
             editzone_base = user_root / "Documents"
             git_commit = True
+            zone_name = "Documents"
             self._init_git_repo(zone_root)
         elif zone_lower == "group":
             if not group:
@@ -3739,11 +3800,12 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
             zone_root = self._ensure_group_space(group_id)
             editzone_base = self._get_groups_root() / group_id
             git_commit = True
+            zone_name = f"group:{group_id}"
         else:
             raise StorageError("ZONE_FORBIDDEN", f"Invalid zone: {zone}")
-        
+
         self._ensure_dir(zone_root)
-        path = self._validate_relative_path(path)
+        path = self._validate_relative_path(path, zone_name, allow_zone_in_path)
         target_path = self._resolve_chroot_path(zone_root, path)
         
         # === PERMISSION CHECK ===
@@ -4059,12 +4121,13 @@ class Tools:
         stderr_file: str = None,
         redirect_stderr_to_stdout: bool = False,
         group: str = None,
+        allow_zone_in_path: bool = False,
         __user__: dict = {},
         __metadata__: dict = {},
     ) -> str:
         """
         Execute a command in the specified zone.
-        
+
         :param zone: Target zone ("uploads", "storage", "documents", or "group")
         :param cmd: Command to execute (must be in whitelist)
         :param args: Command arguments - file paths go here
@@ -4074,8 +4137,12 @@ class Tools:
         :param stderr_file: Save stderr to this file instead of returning it
         :param redirect_stderr_to_stdout: Merge stderr into stdout (like 2>&1)
         :param group: Group name/ID (required if zone="group")
+        :param allow_zone_in_path: Allow paths starting with zone name (default: False).
+            By default, paths like "Documents/folder" in zone="documents" are rejected
+            to prevent accidental duplication. Set True only if you really want a
+            subfolder named after the zone.
         :return: Command output as JSON
-        
+
         Examples:
             shed_exec(zone="uploads", cmd="cat", args=["file.txt"])
             shed_exec(zone="storage", cmd="ls", args=["-la"])
@@ -4083,14 +4150,14 @@ class Tools:
             shed_exec(zone="storage", cmd="grep", args=["-r", "TODO", "."])
             shed_exec(zone="documents", cmd="git", args=["log", "--oneline"])
             shed_exec(zone="group", group="team", cmd="ls", args=["-la"])
-            
+
             # Redirect output to file (like shell > redirection)
             shed_exec(zone="storage", cmd="jq", args=["-r", ".[]", "data.json"], stdout_file="output.txt")
-        
+
         Notes:
         - uploads: read-only commands only
         - documents/group: git commands allowed
-        - File paths in args are relative to zone root
+        - File paths in args are relative to zone root (don't include zone name!)
         - Use mkdir -p to create directories (NOT patch_text with .keep files!)
         - stdout_file/stderr_file: paths relative to zone root
         """
@@ -4102,7 +4169,11 @@ class Tools:
             
             # Validate arguments (path escapes, network, etc.)
             self._core._validate_args(args, ctx.readonly, cmd)
-            validated_args = self._core._validate_path_args(args, ctx.zone_root, cmd)
+            validated_args = self._core._validate_path_args(
+                args, ctx.zone_root, cmd,
+                zone_name=ctx.zone_name,
+                allow_zone_in_path=allow_zone_in_path
+            )
             
             # Validate and resolve output file paths
             stdout_path = None
@@ -4117,9 +4188,13 @@ class Tools:
                         "Use a writable zone (storage, documents)"
                     )
                 # Validate path doesn't escape
-                self._core._validate_path_args([stdout_file], ctx.zone_root, cmd)
+                self._core._validate_path_args(
+                    [stdout_file], ctx.zone_root, cmd,
+                    zone_name=ctx.zone_name,
+                    allow_zone_in_path=allow_zone_in_path
+                )
                 stdout_path = ctx.zone_root / stdout_file
-            
+
             if stderr_file:
                 if ctx.readonly:
                     raise StorageError(
@@ -4129,7 +4204,11 @@ class Tools:
                         "Use a writable zone (storage, documents)"
                     )
                 # Validate path doesn't escape
-                self._core._validate_path_args([stderr_file], ctx.zone_root, cmd)
+                self._core._validate_path_args(
+                    [stderr_file], ctx.zone_root, cmd,
+                    zone_name=ctx.zone_name,
+                    allow_zone_in_path=allow_zone_in_path
+                )
                 stderr_path = ctx.zone_root / stderr_file
             
             # Execute
@@ -4211,17 +4290,18 @@ class Tools:
         group: str = None,
         message: str = None,
         mode: str = None,
+        allow_zone_in_path: bool = False,
         __user__: dict = {},
         __metadata__: dict = {},
     ) -> str:
         """
         Edit a text file in the specified zone.
-        
+
         ⚠️ Use this ONLY for file CONTENT operations!
         For creating directories, use: shed_exec(zone, cmd="mkdir", args=["-p", "dir"])
-        
+
         :param zone: Target zone ("storage", "documents", or "group")
-        :param path: File path relative to zone
+        :param path: File path relative to zone (don't include zone name!)
         :param content: Content to write
         :param position: "start", "end", "before", "after", or "replace" (NOT "overwrite" or "at"!)
         :param line: Line number for "before"/"after"/"replace" (first line is 1, not 0)
@@ -4234,8 +4314,9 @@ class Tools:
         :param group: Group name/ID (required if zone="group")
         :param message: Git commit message (documents/group only, ignored for storage)
         :param mode: Ownership mode for new files in group: "owner", "group", "owner_ro"
+        :param allow_zone_in_path: Allow path starting with zone name (default: False)
         :return: Edit result as JSON
-        
+
         Examples:
             shed_patch_text(zone="storage", path="notes.txt", content="New line\\n", position="end")
             shed_patch_text(zone="storage", path="file.txt", content="inserted\\n", position="before", line=5)
@@ -4249,6 +4330,7 @@ class Tools:
                 pattern=pattern, regex_flags=regex_flags, match_all=match_all,
                 overwrite=overwrite, safe=safe, group=group,
                 message=message, mode=mode,
+                allow_zone_in_path=allow_zone_in_path,
                 __user__=__user__, __metadata__=__metadata__,
             )
         except StorageError as e:
@@ -4269,14 +4351,15 @@ class Tools:
         group: str = None,
         message: str = None,
         mode: str = None,
+        allow_zone_in_path: bool = False,
         __user__: dict = {},
         __metadata__: dict = {},
     ) -> str:
         """
         Edit a binary file in the specified zone.
-        
+
         :param zone: Target zone ("storage", "documents", or "group")
-        :param path: File path relative to zone
+        :param path: File path relative to zone (don't include zone name!)
         :param content: Content to write (format depends on content_format)
         :param content_format: "hex" (default), "base64", or "raw"
         :param position: "start", "end", "at", or "replace"
@@ -4286,8 +4369,9 @@ class Tools:
         :param group: Group name/ID (required if zone="group")
         :param message: Git commit message (documents/group only)
         :param mode: Ownership mode for new files in group
+        :param allow_zone_in_path: Allow path starting with zone name (default: False)
         :return: Edit result as JSON
-        
+
         Examples:
             shed_patch_bytes(zone="storage", path="data.bin", content="48454C4C4F")
             shed_patch_bytes(zone="storage", path="img.png", content="89504E47", position="start")
@@ -4298,6 +4382,7 @@ class Tools:
                 content_format=content_format, position=position,
                 offset=offset, length=length, safe=safe,
                 group=group, message=message, mode=mode,
+                allow_zone_in_path=allow_zone_in_path,
                 __user__=__user__, __metadata__=__metadata__,
             )
         except StorageError as e:
@@ -4311,31 +4396,33 @@ class Tools:
         path: str,
         group: str = None,
         message: str = None,
+        allow_zone_in_path: bool = False,
         __user__: dict = {},
         __metadata__: dict = {},
     ) -> str:
         """
         Delete a file or folder in the specified zone.
-        
+
         :param zone: Target zone ("uploads", "storage", "documents", or "group")
-        :param path: Path to delete (relative to zone)
+        :param path: Path to delete (relative to zone, don't include zone name!)
         :param group: Group name/ID (required if zone="group")
         :param message: Git commit message (documents/group only)
+        :param allow_zone_in_path: Allow path starting with zone name (default: False)
         :return: Deletion result as JSON
-        
+
         Examples:
             shed_delete(zone="uploads", path="temp.txt")
             shed_delete(zone="storage", path="old_project/")
             shed_delete(zone="documents", path="draft.md", message="Remove draft")
             shed_delete(zone="group", group="team", path="obsolete.txt", message="Cleanup")
-        
+
         Note: uploads allows delete to clean up imported files.
         """
         try:
             # uploads allows delete even though readonly for other ops
             ctx = self._core._resolve_zone(zone, group, __user__, __metadata__, require_write=False)
-            
-            path = self._core._validate_relative_path(path)
+
+            path = self._core._validate_relative_path(path, ctx.zone_name, allow_zone_in_path)
             target = self._core._resolve_chroot_path(ctx.zone_root, path)
             
             if not target.exists():
@@ -4383,19 +4470,21 @@ class Tools:
         new_path: str,
         group: str = None,
         message: str = None,
+        allow_zone_in_path: bool = False,
         __user__: dict = {},
         __metadata__: dict = {},
     ) -> str:
         """
         Rename or move a file/folder within the specified zone.
-        
+
         :param zone: Target zone ("storage", "documents", or "group")
-        :param old_path: Current path (relative to zone)
-        :param new_path: New path (relative to zone)
+        :param old_path: Current path (relative to zone, don't include zone name!)
+        :param new_path: New path (relative to zone, don't include zone name!)
         :param group: Group name/ID (required if zone="group")
         :param message: Git commit message (documents/group only)
+        :param allow_zone_in_path: Allow paths starting with zone name (default: False)
         :return: Rename result as JSON
-        
+
         Examples:
             shed_rename(zone="storage", old_path="draft.txt", new_path="final.txt")
             shed_rename(zone="documents", old_path="old/", new_path="archive/", message="Reorganize")
@@ -4403,9 +4492,9 @@ class Tools:
         """
         try:
             ctx = self._core._resolve_zone(zone, group, __user__, __metadata__, require_write=True)
-            
-            old_path = self._core._validate_relative_path(old_path)
-            new_path = self._core._validate_relative_path(new_path)
+
+            old_path = self._core._validate_relative_path(old_path, ctx.zone_name, allow_zone_in_path)
+            new_path = self._core._validate_relative_path(new_path, ctx.zone_name, allow_zone_in_path)
             
             old_target = self._core._resolve_chroot_path(ctx.zone_root, old_path)
             new_target = self._core._resolve_chroot_path(ctx.zone_root, new_path)
