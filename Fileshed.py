@@ -3515,14 +3515,14 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
             zone_root = self._ensure_group_space(group_id)
             editzone_base = self._get_groups_root() / group_id
             git_commit = True
-            zone_name = f"group:{group_id}"
+            zone_name = f"Group:{group_id}"
         else:
             raise StorageError("ZONE_FORBIDDEN", f"Invalid zone: {zone}")
 
         self._ensure_dir(zone_root)
         path = self._validate_relative_path(path, zone_name, allow_zone_in_path)
         target_path = self._resolve_chroot_path(zone_root, path)
-        
+
         # === PERMISSION CHECK (groups) ===
         if group_id:
             can_write, error = self._can_write_group_file(group_id, path, user_id)
@@ -3815,14 +3815,14 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
             zone_root = self._ensure_group_space(group_id)
             editzone_base = self._get_groups_root() / group_id
             git_commit = True
-            zone_name = f"group:{group_id}"
+            zone_name = f"Group:{group_id}"
         else:
             raise StorageError("ZONE_FORBIDDEN", f"Invalid zone: {zone}")
 
         self._ensure_dir(zone_root)
         path = self._validate_relative_path(path, zone_name, allow_zone_in_path)
         target_path = self._resolve_chroot_path(zone_root, path)
-        
+
         # === PERMISSION CHECK ===
         if group_id:
             can_write, error = self._can_write_group_file(group_id, path, user_id)
@@ -5643,6 +5643,7 @@ class Tools:
         path: str = ".",
         depth: int = 3,
         group: str = None,
+        allow_zone_in_path: bool = False,
         __user__: dict = {},
         __metadata__: dict = {},
     ) -> str:
@@ -5667,10 +5668,13 @@ class Tools:
             # Validate zone
             if zone_lower == "uploads":
                 zone_root = user_root / "Uploads" / conv_id
+                zone_name = "Uploads"
             elif zone_lower == "storage":
                 zone_root = user_root / "Storage" / "data"
+                zone_name = "Storage"
             elif zone_lower == "documents":
                 zone_root = user_root / "Documents" / "data"
+                zone_name = "Documents"
             elif zone_lower == "group":
                 if not group:
                     raise StorageError(
@@ -5682,18 +5686,19 @@ class Tools:
                 group_id = self._core._validate_group_id(group)
                 self._core._check_group_access(__user__, group_id)
                 zone_root = self._core._get_group_data_path(group_id)
+                zone_name = f"Group:{group_id}"
             else:
                 raise StorageError(
                     "ZONE_FORBIDDEN",
                     f"Invalid zone: {zone}",
                     hint="Use 'uploads', 'storage', 'documents', or 'group'"
                 )
-            
+
             if not zone_root.exists():
                 return self._core._format_response(True, data={"tree": "(empty)"}, message="Zone is empty")
-            
+
             # Validate and resolve path
-            path = self._core._validate_relative_path(path) if path and path != "." else ""
+            path = self._core._validate_relative_path(path, zone_name, allow_zone_in_path) if path and path != "." else ""
             start_path = self._core._resolve_chroot_path(zone_root, path) if path else zone_root
             
             if not start_path.exists():
@@ -5761,6 +5766,7 @@ class Tools:
         self,
         zone: str,
         path: str,
+        allow_zone_in_path: bool = False,
         __user__: dict = {},
         __metadata__: dict = {},
     ) -> str:
@@ -5781,20 +5787,23 @@ class Tools:
             # Validate zone
             if zone_lower == "storage":
                 zone_root = user_root / "Storage" / "data"
+                zone_name = "Storage"
             elif zone_lower == "documents":
                 zone_root = user_root / "Documents" / "data"
+                zone_name = "Documents"
             elif zone_lower == "uploads":
                 conv_id = self._core._get_conv_id(__metadata__)
                 zone_root = user_root / "Uploads" / conv_id
+                zone_name = "Uploads"
             else:
                 raise StorageError(
                     "ZONE_FORBIDDEN",
                     f"Invalid zone: {zone}",
                     hint="Use 'uploads', 'storage', or 'documents'"
                 )
-            
+
             # Validate and resolve path
-            path = self._core._validate_relative_path(path)
+            path = self._core._validate_relative_path(path, zone_name, allow_zone_in_path)
             zip_path = self._core._resolve_chroot_path(zone_root, path)
             
             if not zip_path.exists():
@@ -5855,6 +5864,7 @@ class Tools:
         self,
         zone: str,
         path: str,
+        allow_zone_in_path: bool = False,
         __user__: dict = {},
         __metadata__: dict = {},
     ) -> str:
@@ -5876,24 +5886,27 @@ class Tools:
             # Validate zone
             if zone_lower == "uploads":
                 zone_root = user_root / "Uploads" / conv_id
+                zone_name = "Uploads"
             elif zone_lower == "storage":
                 zone_root = user_root / "Storage" / "data"
+                zone_name = "Storage"
             elif zone_lower == "documents":
                 zone_root = user_root / "Documents" / "data"
+                zone_name = "Documents"
             else:
                 raise StorageError(
                     "ZONE_FORBIDDEN",
                     f"Invalid zone: {zone}",
                     hint="Use 'uploads', 'storage', or 'documents'"
                 )
-            
+
             # Validate and resolve path
-            path = self._core._validate_relative_path(path)
+            path = self._core._validate_relative_path(path, zone_name, allow_zone_in_path)
             file_path = self._core._resolve_chroot_path(zone_root, path)
-            
+
             if not file_path.exists():
                 raise StorageError("FILE_NOT_FOUND", f"File not found: {path}")
-            
+
             if file_path.is_dir():
                 return self._core._format_response(
                     True,
@@ -6103,6 +6116,7 @@ class Tools:
         path: str,
         offset: int = 0,
         length: int = 256,
+        allow_zone_in_path: bool = False,
         __user__: dict = {},
         __metadata__: dict = {},
     ) -> str:
@@ -6126,24 +6140,27 @@ class Tools:
             # Validate zone
             if zone_lower == "uploads":
                 zone_root = user_root / "Uploads" / conv_id
+                zone_name = "Uploads"
             elif zone_lower == "storage":
                 zone_root = user_root / "Storage" / "data"
+                zone_name = "Storage"
             elif zone_lower == "documents":
                 zone_root = user_root / "Documents" / "data"
+                zone_name = "Documents"
             else:
                 raise StorageError(
                     "ZONE_FORBIDDEN",
                     f"Invalid zone: {zone}",
                     hint="Use 'uploads', 'storage', or 'documents'"
                 )
-            
+
             # Validate and resolve path
-            path = self._core._validate_relative_path(path)
+            path = self._core._validate_relative_path(path, zone_name, allow_zone_in_path)
             file_path = self._core._resolve_chroot_path(zone_root, path)
-            
+
             if not file_path.exists():
                 raise StorageError("FILE_NOT_FOUND", f"File not found: {path}")
-            
+
             if file_path.is_dir():
                 raise StorageError("INVALID_FORMAT", "Cannot hexdump directory")
             
@@ -7652,39 +7669,43 @@ shed_tree(zone="storage") # Directory tree
         zone: str = "",
         path: str = "",
         group: str = "",
+        allow_zone_in_path: bool = False,
         __user__: dict = {},
         __metadata__: dict = {},
     ) -> str:
         """
         Forces file unlock (crash recovery).
-        
+
         Use this if a file is stuck in edit mode after a crash.
-        
+
         :param zone: "storage" or "documents" (for personal zones)
         :param path: File path relative to zone
         :param group: Group ID (for group zones - use instead of zone)
         :return: Confirmation as JSON
-        
+
         Examples:
             shed_force_unlock(zone="storage", path="stuck_file.txt")
             shed_force_unlock(group="team", path="locked_doc.md")
         """
         try:
-            # Validate path
+            # Validate path is provided
             if not path:
                 raise StorageError("MISSING_PARAMETER", "path is required")
-            path = self._core._validate_relative_path(path)
-            
+
             # Determine if group or personal zone
             if group:
                 # Group mode
                 group = self._core._validate_group_id(group)
                 self._core._check_group_access(__user__, group)
-                
+                zone_name = f"Group:{group}"
+
+                # Validate path with zone_name
+                path = self._core._validate_relative_path(path, zone_name, allow_zone_in_path)
+
                 group_path = self._core._get_groups_root() / group
                 lock_path = group_path / "locks" / (path + ".lock")
                 editzone_base = group_path / "editzone"
-                zone_display = f"Group:{group}"
+                zone_display = zone_name
             else:
                 # Personal zone mode
                 if not zone:
@@ -7693,7 +7714,7 @@ shed_tree(zone="storage") # Directory tree
                         "Must specify either 'zone' or 'group'",
                         hint="Use zone='storage' or zone='documents', or group='group_id'"
                     )
-                
+
                 if zone.lower() not in ("storage", "documents"):
                     raise StorageError(
                         "ZONE_FORBIDDEN",
@@ -7701,11 +7722,14 @@ shed_tree(zone="storage") # Directory tree
                         {},
                         "Use 'storage' or 'documents'"
                     )
-                
+
                 user_root = self._core._get_user_root(__user__)
                 zone_name = "Storage" if zone.lower() == "storage" else "Documents"
+
+                # Validate path with zone_name
+                path = self._core._validate_relative_path(path, zone_name, allow_zone_in_path)
+
                 zone_root = user_root / zone_name
-                
                 lock_path = self._core._get_lock_path(zone_root, path)
                 editzone_base = zone_root / "editzone"
                 zone_display = zone_name
@@ -7983,11 +8007,12 @@ shed_tree(zone="storage") # Directory tree
         group: str,
         path: str,
         mode: str,
+        allow_zone_in_path: bool = False,
         __user__: dict = {},
     ) -> str:
         """
         Changes the write mode of a file (owner only).
-        
+
         :param group: Group ID or group name
         :param path: File path
         :param mode: New mode: 'owner', 'group', or 'owner_ro'
@@ -7998,9 +8023,10 @@ shed_tree(zone="storage") # Directory tree
             group = self._core._validate_group_id(group)
             self._core._check_group_access(__user__, group)
             user_id = __user__.get("id", "")
-            
+            zone_name = f"Group:{group}"
+
             # Validate path
-            path = self._core._validate_relative_path(path)
+            path = self._core._validate_relative_path(path, zone_name, allow_zone_in_path)
             
             # Validate mode
             if mode not in ("owner", "group", "owner_ro"):
@@ -8042,11 +8068,12 @@ shed_tree(zone="storage") # Directory tree
         group: str,
         path: str,
         new_owner: str,
+        allow_zone_in_path: bool = False,
         __user__: dict = {},
     ) -> str:
         """
         Transfers file ownership to another user (owner only).
-        
+
         :param group: Group ID or group name
         :param path: File path
         :param new_owner: User ID of new owner
@@ -8057,9 +8084,10 @@ shed_tree(zone="storage") # Directory tree
             group = self._core._validate_group_id(group)
             self._core._check_group_access(__user__, group)
             user_id = __user__.get("id", "")
-            
+            zone_name = f"Group:{group}"
+
             # Validate path
-            path = self._core._validate_relative_path(path)
+            path = self._core._validate_relative_path(path, zone_name, allow_zone_in_path)
             
             # Validate new_owner (sanitize)
             if not new_owner or not isinstance(new_owner, str):
@@ -8162,7 +8190,7 @@ shed_tree(zone="storage") # Directory tree
 
             # Validate paths with zone name check
             src_path = self._core._validate_relative_path(src_path, src_zone_name, allow_zone_in_path)
-            dest_path = self._core._validate_relative_path(dest_path, f"group:{group}", allow_zone_in_path)
+            dest_path = self._core._validate_relative_path(dest_path, f"Group:{group}", allow_zone_in_path)
             
             source = self._core._resolve_chroot_path(src_base, src_path)
             
