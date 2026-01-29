@@ -2,7 +2,7 @@
 title: Fileshed
 description: Persistent file storage with group collaboration. FIRST: Run shed_help() for quick reference or shed_help(howto="...") for guides: download, csv_to_sqlite, upload, share, edit, commands, network, paths, full. Config: shed_parameters().
 author: Fade78 (with Claude Opus 4.5)
-version: 1.0.2
+version: 1.0.3
 license: MIT
 required_open_webui_version: 0.4.0
 
@@ -1431,10 +1431,10 @@ sort, uniq, cut, diff, tar (list), unzip (list), md5sum, sha256sum, jq, etc.
 
 ## Storage zone (READ-WRITE)
 All read-only commands PLUS:
-cp, mv, rm, mkdir, rmdir, touch, chmod, ln, tar (create/extract),
+cp, mv, rm, mkdir, rmdir, touch, chmod, tar (create/extract),
 zip, gzip, gunzip, patch, split, csplit, truncate, etc.
 
-Network commands (if enabled): curl, wget, git, rsync, scp, ssh
+Network commands (if enabled): curl, wget, git
 
 ## Documents zone (READ-WRITE + VERSIONED)
 Same as Storage, with automatic Git commits.
@@ -1787,11 +1787,42 @@ shed_exec(zone="storage", cmd="some_cmd", args=["..."],
         """Returns the SQLite database path."""
         return Path(self.valves.storage_base_path) / "access_auth.sqlite"
 
+    def _format_size(self, size_bytes: int, short: bool = False) -> str:
+        """
+        Formats a byte size as a human-readable string.
+
+        :param size_bytes: Size in bytes
+        :param short: If True, use short format (1.5M), else full (1.50 MB)
+        :return: Formatted string
+        """
+        if short:
+            if size_bytes > 1024 * 1024:
+                return f"{size_bytes / 1024 / 1024:.1f}M"
+            elif size_bytes > 1024:
+                return f"{size_bytes / 1024:.1f}K"
+            else:
+                return f"{size_bytes}B"
+        else:
+            if size_bytes > 1024 * 1024:
+                return f"{size_bytes / 1024 / 1024:.2f} MB"
+            elif size_bytes > 1024:
+                return f"{size_bytes / 1024:.1f} KB"
+            else:
+                return f"{size_bytes} B"
+
     def _get_conv_id(self, __metadata__: dict) -> str:
-        """Returns the conversation ID."""
+        """Returns the conversation ID, validated for safe path usage."""
         if __metadata__ is None:
             __metadata__ = {}
-        return __metadata__.get("chat_id", "unknown")
+        conv_id = __metadata__.get("chat_id", "unknown")
+        # Validate conv_id: must not contain path traversal or control characters
+        if conv_id and isinstance(conv_id, str):
+            conv_id = conv_id.strip()
+            if ".." in conv_id or "/" in conv_id or "\\" in conv_id:
+                return "unknown"  # Invalid conv_id, use safe default
+            if any(ord(c) < 32 for c in conv_id):
+                return "unknown"  # Contains control characters
+        return conv_id if conv_id else "unknown"
 
     def _resolve_zone(
         self,
@@ -1939,7 +1970,7 @@ shed_exec(zone="storage", cmd="some_cmd", args=["..."],
                     raise StorageError(
                         "PATH_ESCAPE",
                         "Symlink escape attempt detected",
-                        {"path": relative_path, "symlink": str(next_path)},
+                        {"path": relative_path},
                         "Symlinks pointing outside the zone are not allowed"
                     )
             if next_path.exists():
@@ -1959,7 +1990,7 @@ shed_exec(zone="storage", cmd="some_cmd", args=["..."],
             raise StorageError(
                 "PATH_ESCAPE",
                 "Chroot escape attempt detected",
-                {"path": relative_path, "chroot": str(base)},
+                {"path": relative_path},
                 "Use only relative paths without ../"
             )
 
@@ -2441,7 +2472,7 @@ shed_exec(zone="storage", cmd="some_cmd", args=["..."],
                     raise StorageError(
                         "PATH_ESCAPE",
                         "Chroot escape attempt detected",
-                        {"path": arg_str, "chroot": str(chroot)},
+                        {"path": arg_str},
                         "Resolved path escapes allowed zone"
                     )
 
@@ -2846,6 +2877,16 @@ shed_exec(zone="storage", cmd="some_cmd", args=["..."],
             except (json.JSONDecodeError, OSError, PermissionError):
                 pass  # Corrupted or unreadable lock, allow operation
 
+    def _release_lock(self, lock_path: Path) -> None:
+        """
+        Releases a lock file. Safe to call even if lock doesn't exist.
+        This is the counterpart to _acquire_lock().
+        """
+        try:
+            lock_path.unlink(missing_ok=True)
+        except OSError:
+            pass  # Ignore errors when releasing lock
+
     def _validate_content_size(self, content: str) -> None:
         """Checks that content doesn't exceed max size."""
         max_bytes = self.valves.max_file_size_mb * 1024 * 1024
@@ -3098,7 +3139,9 @@ shed_exec(zone="storage", cmd="some_cmd", args=["..."],
                 "Group features are not available",
                 hint="Open WebUI Groups API not found"
             )
-        
+
+        if __user__ is None:
+            __user__ = {}
         user_id = __user__.get("id", "")
         if not self._is_group_member(user_id, group_id):
             raise StorageError(
@@ -3600,6 +3643,10 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
         __metadata__: dict,
     ) -> str:
         """Internal implementation for text file patching."""
+        if __user__ is None:
+            __user__ = {}
+        if __metadata__ is None:
+            __metadata__ = {}
         user_id = __user__.get("id", "")
         conv_id = self._get_conv_id(__metadata__)
         zone_lower = zone.lower()
@@ -3832,8 +3879,7 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
             if safe:
                 self._ensure_dir(target_path.parent)
                 shutil.move(str(working_path), str(target_path))
-                lock_path.unlink(missing_ok=True)
-            
+
             # === GIT COMMIT ===
             if git_commit:
                 commit_msg = message or f"Patch {path}: {position}"
@@ -3870,8 +3916,7 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
         finally:
             # Cleanup on error: release lock and remove editzone if it wasn't moved
             if safe and lock_path:
-                if lock_path.exists():
-                    lock_path.unlink(missing_ok=True)
+                self._release_lock(lock_path)
                 # Clean up editzone if it still exists (wasn't successfully moved)
                 if 'edit_path' in dir() and edit_path.exists():
                     try:
@@ -3899,6 +3944,10 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
         """Internal implementation for binary file patching."""
         import base64 as base64_module
 
+        if __user__ is None:
+            __user__ = {}
+        if __metadata__ is None:
+            __metadata__ = {}
         user_id = __user__.get("id", "")
         conv_id = self._get_conv_id(__metadata__)
         zone_lower = zone.lower()
@@ -4068,8 +4117,7 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
             if safe:
                 self._ensure_dir(target_path.parent)
                 shutil.move(str(working_path), str(target_path))
-                lock_path.unlink(missing_ok=True)
-            
+
             # === GIT COMMIT ===
             if git_commit:
                 commit_msg = message or f"Patch bytes {path}: {position}"
@@ -4108,8 +4156,7 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
         finally:
             # Cleanup on error: release lock and remove editzone if it wasn't moved
             if safe and lock_path:
-                if lock_path.exists():
-                    lock_path.unlink(missing_ok=True)
+                self._release_lock(lock_path)
                 # Clean up editzone if it still exists (wasn't successfully moved)
                 if 'edit_path' in dir() and edit_path.exists():
                     try:
@@ -4280,8 +4327,8 @@ class Tools:
         redirect_stderr_to_stdout: bool = False,
         group: str = None,
         allow_zone_in_path: bool = False,
-        __user__: dict = {},
-        __metadata__: dict = {},
+        __user__: dict = None,
+        __metadata__: dict = None,
     ) -> str:
         """
         Execute a command in the specified zone.
@@ -4453,8 +4500,8 @@ class Tools:
         message: str = None,
         mode: str = None,
         allow_zone_in_path: bool = False,
-        __user__: dict = {},
-        __metadata__: dict = {},
+        __user__: dict = None,
+        __metadata__: dict = None,
     ) -> str:
         """
         Edit a text file in the specified zone.
@@ -4514,8 +4561,8 @@ class Tools:
         message: str = None,
         mode: str = None,
         allow_zone_in_path: bool = False,
-        __user__: dict = {},
-        __metadata__: dict = {},
+        __user__: dict = None,
+        __metadata__: dict = None,
     ) -> str:
         """
         Edit a binary file in the specified zone.
@@ -4559,8 +4606,8 @@ class Tools:
         group: str = None,
         message: str = None,
         allow_zone_in_path: bool = False,
-        __user__: dict = {},
-        __metadata__: dict = {},
+        __user__: dict = None,
+        __metadata__: dict = None,
     ) -> str:
         """
         Delete a file or folder in the specified zone.
@@ -4581,6 +4628,8 @@ class Tools:
         Note: uploads allows delete to clean up imported files.
         """
         try:
+            if __user__ is None:
+                __user__ = {}
             # uploads allows delete even though readonly for other ops
             ctx = self._core._resolve_zone(zone, group, __user__, __metadata__, require_write=False)
 
@@ -4633,8 +4682,8 @@ class Tools:
         group: str = None,
         message: str = None,
         allow_zone_in_path: bool = False,
-        __user__: dict = {},
-        __metadata__: dict = {},
+        __user__: dict = None,
+        __metadata__: dict = None,
     ) -> str:
         """
         Rename or move a file/folder within the specified zone.
@@ -4653,6 +4702,8 @@ class Tools:
             shed_rename(zone="group", group="team", old_path="v1.doc", new_path="v2.doc")
         """
         try:
+            if __user__ is None:
+                __user__ = {}
             ctx = self._core._resolve_zone(zone, group, __user__, __metadata__, require_write=True)
 
             old_path = self._core._validate_relative_path(old_path, ctx.zone_name, allow_zone_in_path)
@@ -4707,8 +4758,8 @@ class Tools:
         path: str,
         group: str = None,
         allow_zone_in_path: bool = False,
-        __user__: dict = {},
-        __metadata__: dict = {},
+        __user__: dict = None,
+        __metadata__: dict = None,
     ) -> str:
         """
         Open a file for safe editing (locks file, creates working copy).
@@ -4732,6 +4783,8 @@ class Tools:
             shed_lockedit_open(zone="group", group="team", path="shared.txt")
         """
         try:
+            if __user__ is None:
+                __user__ = {}
             ctx = self._core._resolve_zone(zone, group, __user__, __metadata__, require_write=True)
 
             path = self._core._validate_relative_path(path, ctx.zone_name, allow_zone_in_path)
@@ -4781,11 +4834,11 @@ class Tools:
             except Exception:
                 # Clean up editzone and release lock on any failure after acquisition
                 try:
-                    if editzone_path.exists():
+                    if 'editzone_path' in dir() and editzone_path.exists():
                         editzone_path.unlink(missing_ok=True)
                 except OSError:
                     pass
-                lock_path.unlink(missing_ok=True)
+                self._core._release_lock(lock_path)
                 raise
 
         except StorageError as e:
@@ -4802,8 +4855,8 @@ class Tools:
         timeout: int = None,
         group: str = None,
         allow_zone_in_path: bool = False,
-        __user__: dict = {},
-        __metadata__: dict = {},
+        __user__: dict = None,
+        __metadata__: dict = None,
     ) -> str:
         """
         Execute a command on file in editzone (working copy).
@@ -4822,6 +4875,8 @@ class Tools:
             shed_lockedit_exec(zone="storage", path="code.py", cmd="cat", args=["."])
         """
         try:
+            if __user__ is None:
+                __user__ = {}
             args = args or []  # Handle None default
             ctx = self._core._resolve_zone(zone, group, __user__, __metadata__, require_write=True)
 
@@ -4874,8 +4929,8 @@ class Tools:
         append: bool = False,
         group: str = None,
         allow_zone_in_path: bool = False,
-        __user__: dict = {},
-        __metadata__: dict = {},
+        __user__: dict = None,
+        __metadata__: dict = None,
     ) -> str:
         """
         Write content to file in editzone (working copy).
@@ -4896,6 +4951,8 @@ class Tools:
             shed_lockedit_overwrite(zone="storage", path="log.txt", content="New entry\\n", append=True)
         """
         try:
+            if __user__ is None:
+                __user__ = {}
             ctx = self._core._resolve_zone(zone, group, __user__, __metadata__, require_write=True)
 
             path = self._core._validate_relative_path(path, ctx.zone_name, allow_zone_in_path)
@@ -4942,8 +4999,8 @@ class Tools:
         group: str = None,
         message: str = None,
         allow_zone_in_path: bool = False,
-        __user__: dict = {},
-        __metadata__: dict = {},
+        __user__: dict = None,
+        __metadata__: dict = None,
     ) -> str:
         """
         Save edited file back to zone and release lock.
@@ -4965,6 +5022,8 @@ class Tools:
             shed_lockedit_save(zone="documents", path="report.md", message="Final version")
         """
         try:
+            if __user__ is None:
+                __user__ = {}
             ctx = self._core._resolve_zone(zone, group, __user__, __metadata__, require_write=True)
 
             path = self._core._validate_relative_path(path, ctx.zone_name, allow_zone_in_path)
@@ -5006,7 +5065,7 @@ class Tools:
                 self._core._rm_with_empty_parents(editzone_path, ctx.editzone_base / "editzone")
             finally:
                 # Always release lock after successful save
-                lock_path.unlink(missing_ok=True)
+                self._core._release_lock(lock_path)
 
             return self._core._format_response(True, data={
                 "zone": ctx.zone_name,
@@ -5026,8 +5085,8 @@ class Tools:
         path: str,
         group: str = None,
         allow_zone_in_path: bool = False,
-        __user__: dict = {},
-        __metadata__: dict = {},
+        __user__: dict = None,
+        __metadata__: dict = None,
     ) -> str:
         """
         Cancel editing and release lock (discards changes).
@@ -5042,6 +5101,8 @@ class Tools:
             shed_lockedit_cancel(zone="storage", path="config.json")
         """
         try:
+            if __user__ is None:
+                __user__ = {}
             ctx = self._core._resolve_zone(zone, group, __user__, __metadata__, require_write=True)
 
             path = self._core._validate_relative_path(path, ctx.zone_name, allow_zone_in_path)
@@ -5059,8 +5120,8 @@ class Tools:
                 if editzone_path.exists():
                     self._core._rm_with_empty_parents(editzone_path, ctx.editzone_base / "editzone")
             finally:
-                lock_path.unlink(missing_ok=True)
-            
+                self._core._release_lock(lock_path)
+
             return self._core._format_response(True, data={
                 "zone": ctx.zone_name,
                 "path": path,
@@ -5077,8 +5138,8 @@ class Tools:
         src: str,
         dest: str,
         allow_zone_in_path: bool = False,
-        __user__: dict = {},
-        __metadata__: dict = {},
+        __user__: dict = None,
+        __metadata__: dict = None,
     ) -> str:
         """
         Moves file from Uploads to Storage.
@@ -5131,8 +5192,8 @@ class Tools:
         dest: str,
         message: str = None,
         allow_zone_in_path: bool = False,
-        __user__: dict = {},
-        __metadata__: dict = {},
+        __user__: dict = None,
+        __metadata__: dict = None,
     ) -> str:
         """
         Moves file from Uploads to Documents with Git commit.
@@ -5193,8 +5254,8 @@ class Tools:
         dest: str,
         message: str = None,
         allow_zone_in_path: bool = False,
-        __user__: dict = {},
-        __metadata__: dict = {},
+        __user__: dict = None,
+        __metadata__: dict = None,
     ) -> str:
         """
         Copies from Storage to Documents with Git commit.
@@ -5252,8 +5313,8 @@ class Tools:
         dest: str,
         message: str = None,
         allow_zone_in_path: bool = False,
-        __user__: dict = {},
-        __metadata__: dict = {},
+        __user__: dict = None,
+        __metadata__: dict = None,
     ) -> str:
         """
         Moves from Documents to Storage with git rm + commit.
@@ -5317,8 +5378,8 @@ class Tools:
         import_all: bool = False,
         dest_subdir: str = "",
         allow_zone_in_path: bool = False,
-        __user__: dict = {},
-        __metadata__: dict = {},
+        __user__: dict = None,
+        __metadata__: dict = None,
         __files__: list = None,
         __event_emitter__=None,
     ) -> str:
@@ -5337,10 +5398,14 @@ class Tools:
           shed_import(filename="report.pdf")     -> import only report.pdf
         """
         try:
+            if __user__ is None:
+                __user__ = {}
+            if __metadata__ is None:
+                __metadata__ = {}
             user_root = self._core._get_user_root(__user__)
             conv_id = self._core._get_conv_id(__metadata__)
             uploads_dir = user_root / "Uploads" / conv_id
-            
+
             if dest_subdir:
                 # Validate dest_subdir
                 dest_subdir = self._core._validate_relative_path(dest_subdir, "Uploads", allow_zone_in_path)
@@ -5439,12 +5504,14 @@ class Tools:
                         file_name = Path(file_info).name
                     
                     if not file_name:
-                        file_name = file_id or "unknown"
-                    
+                        # Generate unique name to prevent collisions
+                        file_name = file_id or f"unknown_{uuid.uuid4().hex[:8]}"
+
                     # Security: clean filename (prevent traversal)
                     file_name = Path(file_name).name  # Keep only the name, not the path
                     if not file_name or file_name in (".", ".."):
-                        file_name = file_id or "unknown"
+                        # Generate unique name to prevent collisions
+                        file_name = file_id or f"unknown_{uuid.uuid4().hex[:8]}"
                     
                     # Filter if filename specified
                     if filename and file_name != filename:
@@ -5523,8 +5590,8 @@ class Tools:
         dest: str = "",
         src_zone: str = "",
         allow_zone_in_path: bool = False,
-        __user__: dict = {},
-        __metadata__: dict = {},
+        __user__: dict = None,
+        __metadata__: dict = None,
     ) -> str:
         """
         Extracts a ZIP archive using Python zipfile (builtin, no external dependency).
@@ -5605,7 +5672,12 @@ class Tools:
                 dest = self._core._validate_relative_path(dest, zone_name, allow_zone_in_path)
                 dest_path = self._core._resolve_chroot_path(zone_root, dest)
             else:
-                dest_path = src_path.parent
+                # When dest is empty, extract to same relative location in destination zone
+                # (not src_path.parent which would be in the source zone for cross-zone ops)
+                src_relative = str(src_path.parent.relative_to(src_zone_root))
+                # Validate and resolve the path to prevent any escape
+                src_relative = self._core._validate_relative_path(src_relative, zone_name, allow_zone_in_path=True)
+                dest_path = self._core._resolve_chroot_path(zone_root, src_relative)
             
             # Check quota before extraction (estimate: 3x zip size)
             zip_size = src_path.stat().st_size
@@ -5734,8 +5806,8 @@ class Tools:
         dest: str = "",
         include_empty_dirs: bool = False,
         allow_zone_in_path: bool = False,
-        __user__: dict = {},
-        __metadata__: dict = {},
+        __user__: dict = None,
+        __metadata__: dict = None,
     ) -> str:
         """
         Creates a ZIP archive using Python zipfile (builtin, no external dependency).
@@ -5860,8 +5932,8 @@ class Tools:
         depth: int = 3,
         group: str = None,
         allow_zone_in_path: bool = False,
-        __user__: dict = {},
-        __metadata__: dict = {},
+        __user__: dict = None,
+        __metadata__: dict = None,
     ) -> str:
         """
         Displays directory tree structure (replaces missing 'tree' command).
@@ -5952,7 +6024,7 @@ class Tools:
                     else:
                         try:
                             size = item.stat().st_size
-                            size_str = f"{size / 1024 / 1024:.1f}M" if size > 1024*1024 else f"{size / 1024:.1f}K" if size > 1024 else f"{size}B"
+                            size_str = self._format_size(size, short=True)
                         except (OSError, FileNotFoundError):
                             size_str = "?"
                         lines.append(f"{prefix}{connector}{item.name} ({size_str})")
@@ -5985,8 +6057,8 @@ class Tools:
         zone: str,
         path: str,
         allow_zone_in_path: bool = False,
-        __user__: dict = {},
-        __metadata__: dict = {},
+        __user__: dict = None,
+        __metadata__: dict = None,
     ) -> str:
         """
         Shows ZIP archive contents and metadata (replaces missing 'zipinfo' command).
@@ -6062,7 +6134,7 @@ class Tools:
                         "path": path,
                         "files_count": len(files),
                         "total_size": total_size,
-                        "total_size_human": f"{total_size / 1024 / 1024:.2f} MB" if total_size > 1024*1024 else f"{total_size / 1024:.1f} KB",
+                        "total_size_human": self._core._format_size(total_size),
                         "compressed_size": total_compressed,
                         "compression_ratio": f"{ratio:.1f}%",
                         "files": files[:100],  # Limit to 100
@@ -6083,8 +6155,8 @@ class Tools:
         zone: str,
         path: str,
         allow_zone_in_path: bool = False,
-        __user__: dict = {},
-        __metadata__: dict = {},
+        __user__: dict = None,
+        __metadata__: dict = None,
     ) -> str:
         """
         Identifies file MIME type (replaces missing 'file' command).
@@ -6211,8 +6283,8 @@ class Tools:
         path: str,
         to: str = "unix",
         allow_zone_in_path: bool = False,
-        __user__: dict = {},
-        __metadata__: dict = {},
+        __user__: dict = None,
+        __metadata__: dict = None,
     ) -> str:
         """
         Converts line endings (replaces missing 'dos2unix'/'unix2dos' commands).
@@ -6335,8 +6407,8 @@ class Tools:
         offset: int = 0,
         length: int = 256,
         allow_zone_in_path: bool = False,
-        __user__: dict = {},
-        __metadata__: dict = {},
+        __user__: dict = None,
+        __metadata__: dict = None,
     ) -> str:
         """
         Shows hexadecimal dump of file (replaces missing 'xxd'/'hexdump' commands).
@@ -6467,8 +6539,8 @@ class Tools:
         has_header: bool = True,
         group: str = None,
         allow_zone_in_path: bool = False,
-        __user__: dict = {},
-        __metadata__: dict = {},
+        __user__: dict = None,
+        __metadata__: dict = None,
     ) -> str:
         """
         Executes SQL query on a SQLite database file OR imports a CSV file.
@@ -7191,8 +7263,8 @@ class Tools:
         zone: str,
         path: str,
         group: str = None,
-        __user__: dict = {},
-        __metadata__: dict = {},
+        __user__: dict = None,
+        __metadata__: dict = None,
     ) -> str:
         """
         Create a download link for a file.
@@ -7216,6 +7288,8 @@ class Tools:
             shed_link_create(zone="group", group="team", path="shared/presentation.pptx")
         """
         try:
+            if __user__ is None:
+                __user__ = {}
             # Resolve zone and path
             zone_lower = zone.lower()
             user_root = self._core._get_user_root(__user__)
@@ -7223,10 +7297,13 @@ class Tools:
             if zone_lower == "uploads":
                 conv_id = self._core._get_conv_id(__metadata__)
                 chroot = user_root / "Uploads" / conv_id
+                zone_name = "Uploads"
             elif zone_lower == "storage":
                 chroot = user_root / "Storage" / "data"
+                zone_name = "Storage"
             elif zone_lower == "documents":
                 chroot = user_root / "Documents" / "data"
+                zone_name = "Documents"
             elif zone_lower == "group":
                 if not group:
                     raise StorageError(
@@ -7238,6 +7315,7 @@ class Tools:
                 group_id = self._core._validate_group_id(group)
                 self._core._check_group_access(__user__, group_id)
                 chroot = Path(self.valves.storage_base_path) / "groups" / group_id / "data"
+                zone_name = f"Group:{group_id}"
             else:
                 raise StorageError(
                     "INVALID_ZONE",
@@ -7245,7 +7323,10 @@ class Tools:
                     {"zone": zone, "valid_zones": ["uploads", "storage", "documents", "group"]},
                     "Use one of: uploads, storage, documents, group"
                 )
-            
+
+            # Validate path (check for zone prefix duplication)
+            path = self._core._validate_relative_path(path, zone_name, allow_zone_in_path=False)
+
             # Resolve and validate path
             filepath = self._core._resolve_chroot_path(chroot, path)
             
@@ -7350,7 +7431,7 @@ class Tools:
 
     async def shed_link_list(
         self,
-        __user__: dict = {},
+        __user__: dict = None,
     ) -> str:
         """
         List all download links created by the current user.
@@ -7365,6 +7446,8 @@ class Tools:
             shed_link_list()
         """
         try:
+            if __user__ is None:
+                __user__ = {}
             user_id = __user__.get("id")
             if not user_id:
                 raise StorageError(
@@ -7431,7 +7514,7 @@ class Tools:
     async def shed_link_delete(
         self,
         file_id: str,
-        __user__: dict = {},
+        __user__: dict = None,
     ) -> str:
         """
         Remove a download link from Open WebUI.
@@ -7449,6 +7532,8 @@ class Tools:
             shed_link_delete(file_id="317ef925-c87a-44fd-8d29-acdccb8e6070")
         """
         try:
+            if __user__ is None:
+                __user__ = {}
             user_id = __user__.get("id")
             if not user_id:
                 raise StorageError(
@@ -7535,8 +7620,8 @@ class Tools:
     async def shed_help(
         self,
         howto: str = None,
-        __user__: dict = {},
-        __metadata__: dict = {},
+        __user__: dict = None,
+        __metadata__: dict = None,
     ) -> str:
         """
         Get help for Fileshed. Call without arguments for quick reference,
@@ -7666,8 +7751,8 @@ shed_tree(zone="storage") # Directory tree
 
     async def shed_stats(
         self,
-        __user__: dict = {},
-        __metadata__: dict = {},
+        __user__: dict = None,
+        __metadata__: dict = None,
     ) -> str:
         """
         Returns usage statistics.
@@ -7729,8 +7814,8 @@ shed_tree(zone="storage") # Directory tree
     
     async def shed_parameters(
         self,
-        __user__: dict = {},
-        __metadata__: dict = {},
+        __user__: dict = None,
+        __metadata__: dict = None,
     ) -> str:
         """
         Returns current valve configuration (read-only).
@@ -7788,8 +7873,8 @@ shed_tree(zone="storage") # Directory tree
     
     async def shed_allowed_commands(
         self,
-        __user__: dict = {},
-        __metadata__: dict = {},
+        __user__: dict = None,
+        __metadata__: dict = None,
     ) -> str:
         """
         Tests available commands in container.
@@ -7872,8 +7957,8 @@ shed_tree(zone="storage") # Directory tree
         path: str = "",
         group: str = "",
         allow_zone_in_path: bool = False,
-        __user__: dict = {},
-        __metadata__: dict = {},
+        __user__: dict = None,
+        __metadata__: dict = None,
     ) -> str:
         """
         Forces file unlock (crash recovery).
@@ -7957,8 +8042,8 @@ shed_tree(zone="storage") # Directory tree
     
     async def shed_maintenance(
         self,
-        __user__: dict = {},
-        __metadata__: dict = {},
+        __user__: dict = None,
+        __metadata__: dict = None,
     ) -> str:
         """
         Cleans expired locks and orphan editzones (personal and group spaces).
@@ -7966,6 +8051,8 @@ shed_tree(zone="storage") # Directory tree
         :return: Cleanup report as JSON
         """
         try:
+            if __user__ is None:
+                __user__ = {}
             user_root = self._core._get_user_root(__user__)
             max_age_hours = self.valves.lock_max_age_hours
             now = datetime.now(timezone.utc)
@@ -8070,7 +8157,7 @@ shed_tree(zone="storage") # Directory tree
     
     async def shed_group_list(
         self,
-        __user__: dict = {},
+        __user__: dict = None,
     ) -> str:
         """
         Lists groups the user belongs to.
@@ -8078,12 +8165,14 @@ shed_tree(zone="storage") # Directory tree
         :return: List of groups with id, name, and member count
         """
         try:
+            if __user__ is None:
+                __user__ = {}
             if not GROUPS_AVAILABLE:
                 return self._core._format_response(
                     False,
                     message="Group features are not available (Open WebUI Groups API not found)"
                 )
-            
+
             user_id = __user__.get("id", "")
             groups = self._core._get_user_groups(user_id)
             
@@ -8117,7 +8206,7 @@ shed_tree(zone="storage") # Directory tree
     async def shed_group_info(
         self,
         group: str,
-        __user__: dict = {},
+        __user__: dict = None,
     ) -> str:
         """
         Shows group files, ownership information, and statistics.
@@ -8210,7 +8299,7 @@ shed_tree(zone="storage") # Directory tree
         path: str,
         mode: str,
         allow_zone_in_path: bool = False,
-        __user__: dict = {},
+        __user__: dict = None,
     ) -> str:
         """
         Changes the write mode of a file (owner only).
@@ -8221,6 +8310,8 @@ shed_tree(zone="storage") # Directory tree
         :return: Operation result as JSON
         """
         try:
+            if __user__ is None:
+                __user__ = {}
             # Validate group_id
             group = self._core._validate_group_id(group)
             self._core._check_group_access(__user__, group)
@@ -8271,7 +8362,7 @@ shed_tree(zone="storage") # Directory tree
         path: str,
         new_owner: str,
         allow_zone_in_path: bool = False,
-        __user__: dict = {},
+        __user__: dict = None,
     ) -> str:
         """
         Transfers file ownership to another user (owner only).
@@ -8282,6 +8373,8 @@ shed_tree(zone="storage") # Directory tree
         :return: Operation result as JSON
         """
         try:
+            if __user__ is None:
+                __user__ = {}
             # Validate group_id
             group = self._core._validate_group_id(group)
             self._core._check_group_access(__user__, group)
@@ -8348,8 +8441,8 @@ shed_tree(zone="storage") # Directory tree
         message: str = "Add file to group",
         mode: str = None,
         allow_zone_in_path: bool = False,
-        __user__: dict = {},
-        __metadata__: dict = {},
+        __user__: dict = None,
+        __metadata__: dict = None,
     ) -> str:
         """
         Copies a file from personal space to group.
@@ -8364,6 +8457,10 @@ shed_tree(zone="storage") # Directory tree
         :return: Operation result as JSON
         """
         try:
+            if __user__ is None:
+                __user__ = {}
+            if __metadata__ is None:
+                __metadata__ = {}
             # Validate group_id
             group = self._core._validate_group_id(group)
             self._core._check_group_access(__user__, group)

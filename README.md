@@ -245,6 +245,9 @@ shed_zip(zone="storage", src="projects", dest="backup.zip", include_empty_dirs=T
 # Extract a ZIP
 shed_unzip(zone="storage", src="archive.zip", dest="extracted/")
 
+# Extract a ZIP from Uploads to Storage (cross-zone)
+shed_unzip(zone="storage", src="data.zip", dest="imported/", src_zone="uploads")
+
 # List ZIP contents without extracting
 shed_zipinfo(zone="storage", path="archive.zip")
 ```
@@ -366,7 +369,7 @@ shed_patch_text(zone="storage", path="projects/2024/.keep", content="")
 | Function | Description |
 |----------|-------------|
 | `shed_zip(zone, src, dest='', include_empty_dirs=False)` | Create ZIP archive |
-| `shed_unzip(zone, src, dest='')` | Extract ZIP archive |
+| `shed_unzip(zone, src, dest='', src_zone='')` | Extract ZIP archive (src_zone allows extracting from another zone) |
 | `shed_zipinfo(zone, path)` | List ZIP contents |
 
 ### Data & Analysis (2 functions)

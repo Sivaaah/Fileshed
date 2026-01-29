@@ -339,20 +339,38 @@ Commands are separated into two whitelists:
 
 **WHITELIST_READONLY** (for Uploads zone):
 
-- `cat`, `head`, `tail`, `less`, `more`
-- `ls`, `find`, `tree`, `stat`, `file`
-- `grep`, `wc`, `diff`, `sort`, `uniq`
-- `md5sum`, `sha256sum`, `base64`
-- `hexdump`, `xxd`, `strings`, `od`
+Reading: `cat`, `head`, `tail`, `less`, `more`, `nl`, `wc`, `stat`, `file`, `du`, `tac`
+Navigation: `ls`, `tree`, `find`
+Text search: `grep`, `egrep`, `fgrep`, `rg`, `awk`, `sed`
+Text transformation: `sort`, `uniq`, `cut`, `paste`, `tr`, `fold`, `fmt`, `column`, `rev`, `shuf`, `expand`, `unexpand`, `pr`, `join`
+Comparison: `diff`, `diff3`, `cmp`, `comm`
+Archives (list): `tar`, `unzip`, `zipinfo`, `7z`
+Compression (stdout): `zcat`, `bzcat`, `xzcat`
+Checksums: `md5sum`, `sha1sum`, `sha256sum`, `sha512sum`, `b2sum`, `cksum`
+Encoding: `base32`, `base64`, `basenc`
+Binary/Hex: `strings`, `od`, `hexdump`, `xxd`
+JSON/XML/YAML: `jq`, `xmllint`, `yq`
+Misc: `iconv`, `bc`, `dc`, `expr`, `factor`, `numfmt`, `basename`, `dirname`, `realpath`, `echo`, `printf`
+Media info: `ffprobe`, `identify`, `exiftool`
+Database: `sqlite3`
 
 **WHITELIST_READWRITE** (for Storage, Documents, Groups):
 
-- All of READONLY plus:
-- `cp`, `mv`, `rm`, `mkdir`, `touch`
-- `sed`, `awk`, `cut`, `tr`, `paste`
-- `tar`, `gzip`, `gunzip`, `zip`, `unzip`
-- `git` (for Documents/Groups)
-- `curl`, `wget` (if network_mode allows)
+All of READONLY plus:
+Additional reading: `df`, `locate`, `which`, `whereis`
+Split: `split`, `csplit`
+Additional comparison: `sdiff`, `patch`, `colordiff`
+Archives: `zip`, `7za`
+Compression: `gzip`, `gunzip`, `bzip2`, `bunzip2`, `xz`, `unxz`, `lz4`, `zstd`
+Checksums: `sum`
+Encoding: `uuencode`, `uudecode`
+File modification: `touch`, `mkdir`, `rm`, `rmdir`, `mv`, `cp`, `truncate`, `mktemp`, `install`, `shred`, `rename`
+Permissions: `chmod`
+Document conversion: `pandoc`, `dos2unix`, `unix2dos`, `recode`
+Misc: `seq`, `date`, `cal`, `readlink`, `pathchk`, `pwd`, `uname`, `nproc`, `printenv`, `sleep`, `yes`, `tee`, `envsubst`, `gettext`, `tsort`, `true`, `false`
+Media: `ffmpeg`, `magick`, `convert`
+Versioning: `git`
+Network (if enabled): `curl`, `wget`
 
 ### Forbidden patterns
 
@@ -439,6 +457,7 @@ Response format:
 | `ACCESS_DENIED` | Access denied (e.g., not your download link) |
 | `COMMAND_FORBIDDEN` | Command not in whitelist or network disabled |
 | `ARGUMENT_FORBIDDEN` | Dangerous argument pattern or URL when network disabled |
+| `ARGUMENT_REQUIRED` | Required argument missing (e.g., curl/wget need -o/-O) |
 | `QUOTA_EXCEEDED` | Storage quota exceeded |
 | `INVALID_ZONE` | Unknown zone parameter |
 | `ZONE_FORBIDDEN` | Invalid zone for this operation |
@@ -459,6 +478,21 @@ Response format:
 | `TABLE_EXISTS` | SQLite table already exists (use if_exists) |
 | `ZIP_BOMB` | ZIP file may be a decompression bomb |
 | `NO_USER_ID` | User ID not available (internal error) |
+| `INVALID_USER` | User ID is missing, empty, or invalid format |
+| `INVALID_GROUP_ID` | Group ID contains forbidden characters |
+| `INVALID_MODE` | Invalid write mode (not owner/group/owner_ro) |
+| `DB_ERROR` | Database operation failed |
+| `GROUP_NOT_FOUND` | Group not found by name |
+| `GROUP_NOT_AVAILABLE` | Group features unavailable (API not found) |
+| `INTERNAL_API_ERROR` | Internal API error |
+| `NOT_FILE_OWNER` | User is not the file owner |
+| `NOT_LOCK_OWNER` | User does not own the lock |
+| `MISSING_FILE_ID` | File ID required but not provided |
+| `LOCK_ERROR` | Failed to acquire lock |
+| `CSV_EMPTY` | CSV file has no data rows |
+| `COMMAND_NOT_FOUND` | Command not found on system |
+| `GIT_NOT_AVAILABLE` | Git is not available on system |
+| `EXECUTION_ERROR` | Command execution error |
 | `OPENWEBUI_API_UNAVAILABLE` | Open WebUI internal API unavailable |
 | `OPENWEBUI_INSERT_ERROR` | Failed to create download link |
 | `OPENWEBUI_GET_ERROR` | Failed to retrieve file metadata |
