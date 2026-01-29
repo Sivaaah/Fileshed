@@ -75,7 +75,7 @@ import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 from pydantic import BaseModel, Field
 
 # Try to import Open WebUI Groups API
@@ -2849,10 +2849,11 @@ shed_exec(zone="storage", cmd="some_cmd", args=["..."],
     def _validate_content_size(self, content: str) -> None:
         """Checks that content doesn't exceed max size."""
         max_bytes = self.valves.max_file_size_mb * 1024 * 1024
-        if len(content.encode('utf-8')) > max_bytes:
+        content_size = len(content.encode('utf-8'))
+        if content_size > max_bytes:
             raise StorageError(
                 "FILE_TOO_LARGE",
-                f"Content too large ({len(content.encode('utf-8')) / 1024 / 1024:.2f} MB)",
+                f"Content too large ({content_size / 1024 / 1024:.2f} MB)",
                 {"max_mb": self.valves.max_file_size_mb},
                 f"Max size is {self.valves.max_file_size_mb} MB"
             )
@@ -3004,7 +3005,6 @@ shed_exec(zone="storage", cmd="some_cmd", args=["..."],
         hooks_path = repo_path / ".git" / "hooks"
         if hooks_path.exists():
             # Remove all hook files (they could be malicious)
-            import shutil
             shutil.rmtree(hooks_path, ignore_errors=True)
             # Recreate empty hooks directory
             hooks_path.mkdir(exist_ok=True)
@@ -5642,8 +5642,9 @@ class Tools:
                         )
 
                 # ZIP bomb protection: check decompressed size and file count
-                total_size = sum(info.file_size for info in zf.infolist())
-                file_count = len(zf.infolist())
+                infolist = zf.infolist()
+                total_size = sum(info.file_size for info in infolist)
+                file_count = len(infolist)
 
                 if file_count > ZIP_MAX_FILES:
                     raise StorageError(
@@ -5670,13 +5671,13 @@ class Tools:
                     )
 
                 # Extract all files (safe after validation)
+                members = zf.namelist()
                 try:
                     zf.extractall(dest_path)
-                    extracted_files = zf.namelist()
+                    extracted_files = members
                 except Exception:
                     # Clean up any partially extracted files and directories on error
                     # First remove files, then directories (in reverse order for nested dirs)
-                    members = zf.namelist()
                     # Remove files first
                     for member in members:
                         member_path = dest_path / member
@@ -5936,9 +5937,11 @@ class Tools:
                 # Filter out hidden files and limit items
                 items = [i for i in items if not i.name.startswith('.')]
                 total = len(items)
-                
-                for idx, item in enumerate(items[:100]):  # Limit to 100 items per dir
-                    is_last = (idx == len(items[:100]) - 1) or (idx == 99 and total > 100)
+                items_limited = items[:100]  # Limit to 100 items per dir
+                items_limited_count = len(items_limited)
+
+                for idx, item in enumerate(items_limited):
+                    is_last = (idx == items_limited_count - 1) or (idx == 99 and total > 100)
                     connector = "└── " if is_last else "├── "
                     
                     if item.is_dir():
