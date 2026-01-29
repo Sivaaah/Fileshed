@@ -434,28 +434,35 @@ Response format:
 | `FILE_TOO_LARGE` | File exceeds max_file_size_mb limit |
 | `FILE_LOCKED` | File locked by another user/conversation |
 | `PATH_ESCAPE` | Path traversal or symlink escape attempt blocked |
+| `PATH_STARTS_WITH_ZONE` | Path incorrectly starts with zone name (see howto="paths") |
 | `PERMISSION_DENIED` | Group ownership check failed |
-| `COMMAND_FORBIDDEN` | Command not in whitelist |
-| `ARGUMENT_FORBIDDEN` | Dangerous argument pattern detected |
+| `ACCESS_DENIED` | Access denied (e.g., not your download link) |
+| `COMMAND_FORBIDDEN` | Command not in whitelist or network disabled |
+| `ARGUMENT_FORBIDDEN` | Dangerous argument pattern or URL when network disabled |
 | `QUOTA_EXCEEDED` | Storage quota exceeded |
 | `INVALID_ZONE` | Unknown zone parameter |
 | `ZONE_FORBIDDEN` | Invalid zone for this operation |
 | `ZONE_READONLY` | Write operation on read-only zone (Uploads) |
 | `MISSING_PARAMETER` | Required parameter missing |
+| `MISSING_GROUP` | Group parameter required for zone="group" |
 | `INVALID_PARAMETER` | Invalid parameter value |
 | `GROUP_ACCESS_DENIED` | User is not a member of the group |
 | `NOT_A_FILE` | Expected file but found directory |
 | `NOT_IN_EDIT_MODE` | File not open for locked editing |
+| `NOT_A_FILESHED_LINK` | File was not created by Fileshed |
 | `PATTERN_NOT_FOUND` | Regex pattern not found in file |
 | `EXEC_ERROR` | Command execution failed |
-| `EXEC_TIMEOUT` | Command exceeded timeout |
+| `TIMEOUT` | Command exceeded timeout |
 | `INVALID_FORMAT` | Invalid file format for operation |
 | `INVALID_OWNER` | Invalid owner ID for chown |
 | `CSV_PARSE_ERROR` | Failed to parse CSV file |
 | `TABLE_EXISTS` | SQLite table already exists (use if_exists) |
-| `NETWORK_FORBIDDEN` | Network access disabled by policy |
-| `LINK_NOT_FOUND` | Download link not found |
-| `LINK_ACCESS_DENIED` | Not authorized to access this link |
+| `ZIP_BOMB` | ZIP file may be a decompression bomb |
+| `NO_USER_ID` | User ID not available (internal error) |
+| `OPENWEBUI_API_UNAVAILABLE` | Open WebUI internal API unavailable |
+| `OPENWEBUI_INSERT_ERROR` | Failed to create download link |
+| `OPENWEBUI_GET_ERROR` | Failed to retrieve file metadata |
+| `OPENWEBUI_DELETE_ERROR` | Failed to delete download link |
 
 ## Response Format
 
