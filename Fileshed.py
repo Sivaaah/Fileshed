@@ -1525,19 +1525,48 @@ shed_exec(zone="storage", cmd="git", args=["clone", "https://github.com/user/rep
         "paths": """
 # HOWTO: Path rules
 
-## Golden rule
-Paths are RELATIVE to the zone root. Never include the zone name!
+## ⚠️ CRITICAL: Never include the zone name in the path!
 
-## Correct vs Wrong
+The `zone` parameter already specifies WHERE to operate. The path in `args` is RELATIVE to that zone.
+
+**If you include the zone name in the path, you'll create a DUPLICATE folder!**
+
+### Example of the mistake
+
+User asks: "In Documents, create a folder Stolonique"
+
 ```
-CORRECT: shed_exec(zone="storage", cmd="cat", args=["projects/file.txt"])
-WRONG:   shed_exec(zone="storage", cmd="cat", args=["Storage/projects/file.txt"])
+❌ WRONG (creates Documents/Documents/Stolonique):
+shed_exec(zone="Documents", cmd="mkdir", args=["-p", "Documents/Stolonique"])
+                                                     ^^^^^^^^^^
+                                                     This creates an unwanted "Documents" subfolder!
 
-CORRECT: shed_exec(zone="documents", cmd="ls", args=["reports"])
-WRONG:   shed_exec(zone="documents", cmd="ls", args=["Documents/reports"])
+✅ CORRECT (creates Documents/Stolonique):
+shed_exec(zone="Documents", cmd="mkdir", args=["-p", "Stolonique"])
+```
+
+### Why this happens
+
+The zone parameter already points to the Documents folder:
+- zone="Documents" → You're working INSIDE Documents
+- args=["Stolonique"] → Creates Stolonique/ inside Documents
+- args=["Documents/Stolonique"] → Creates Documents/Stolonique/ inside Documents (WRONG!)
+
+### More examples
+
+```
+✅ CORRECT: shed_exec(zone="storage", cmd="cat", args=["projects/file.txt"])
+❌ WRONG:   shed_exec(zone="storage", cmd="cat", args=["Storage/projects/file.txt"])
+
+✅ CORRECT: shed_exec(zone="documents", cmd="ls", args=["reports"])
+❌ WRONG:   shed_exec(zone="documents", cmd="ls", args=["Documents/reports"])
+
+✅ CORRECT: shed_exec(zone="documents", cmd="mkdir", args=["-p", "Projects/2024"])
+❌ WRONG:   shed_exec(zone="documents", cmd="mkdir", args=["-p", "Documents/Projects/2024"])
 ```
 
 ## Zone roots
+
 Paths are always relative to the zone root:
 - Uploads: per-conversation (auto-managed)
 - Storage: your personal workspace
@@ -1545,16 +1574,19 @@ Paths are always relative to the zone root:
 - Group: shared group space
 
 ## Case sensitivity
+
 - **Zone parameter**: case-insensitive ("Storage" = "storage" = "STORAGE")
 - **Group name**: ⚠️ **CASE-SENSITIVE** ("MyTeam" ≠ "myteam" ≠ "MYTEAM")
 - **File paths**: depends on filesystem (usually case-sensitive on Linux)
 
 ## Creating folders
+
 ```
 shed_exec(zone="storage", cmd="mkdir", args=["-p", "projects/webapp/src"])
 ```
 
 ## Listing contents
+
 ```
 shed_exec(zone="storage", cmd="ls", args=["-la"])           # Root of Storage
 shed_exec(zone="storage", cmd="ls", args=["-la", "projects"]) # Subfolder
