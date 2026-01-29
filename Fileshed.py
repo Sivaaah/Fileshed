@@ -313,15 +313,24 @@ BLACKLIST_COMMANDS = {
 }
 
 # Pattern to detect dangerous arguments (shell metacharacters)
-# Blocks: ; & | ` $ \n \r && || >> << > < $( ${
-DANGEROUS_ARGS_PATTERN = re.compile(r'[;&|`$\n\r]|&&|\|\||>>|<<|>|<|\$\(|\$\{')
+# Blocks: ; & | ` \n \r && || >> << > $( ${
+# Note: $ alone is NOT blocked because subprocess.run() with list args doesn't expand variables
+# Only $( and ${ are dangerous (command substitution / brace expansion)
+# Note: < is allowed for comparisons (reading via getline < is blocked separately)
+# Note: > is blocked to prevent file writes outside chroot (use stdout_file parameter instead)
+DANGEROUS_ARGS_PATTERN = re.compile(r'[;&|`\n\r]|&&|\|\||>>|<<|>|\$\(|\$\{')
 
 # Same pattern but allows | (for commands that use | in their internal syntax)
-# Used for: jq (pipe operator), awk (print | "cmd" - but we block system() separately)
-DANGEROUS_ARGS_PATTERN_ALLOW_PIPE = re.compile(r'[;&`$\n\r]|&&|>>|<<|>|<|\$\(|\$\{')
+# Used for: jq (pipe operator), awk (print | "cmd" - but we block system() separately),
+# grep -E (extended regex alternation)
+DANGEROUS_ARGS_PATTERN_ALLOW_PIPE = re.compile(r'[;&`\n\r]|&&|>>|<<|>|\$\(|\$\{')
 
 # Commands that use | in their internal syntax (not shell pipes)
-COMMANDS_ALLOWING_PIPE = {"jq", "awk", "gawk", "mawk", "nawk"}
+# - jq: pipe operator for chaining filters
+# - awk: print | "cmd" (but we block system() separately via AWK_DANGEROUS_PATTERNS)
+# - grep/egrep/fgrep: extended regex alternation with -E or -P flags
+# Safe because subprocess.run() with list args never invokes shell interpretation
+COMMANDS_ALLOWING_PIPE = {"jq", "awk", "gawk", "mawk", "nawk", "grep", "egrep", "fgrep"}
 
 # Pattern to detect URLs (network access via ffmpeg, pandoc, imagemagick, etc.)
 # Blocks: http://, https://, ftp://, rtmp://, rtsp://, smb://, file://, etc.
@@ -330,9 +339,10 @@ URL_PATTERN = re.compile(r'^[a-zA-Z][a-zA-Z0-9+.-]*://', re.IGNORECASE)
 # find options that can execute commands (security risk)
 FIND_EXEC_OPTIONS = {"-exec", "-execdir", "-ok", "-okdir"}
 
-# awk patterns that can execute commands (security risk)
-# system() executes shell commands, getline can pipe from commands
-AWK_DANGEROUS_PATTERNS = re.compile(r'\bsystem\s*\(|\|\s*getline|\bgetline\s*<')
+# awk patterns that can execute commands or leak sensitive data (security risk)
+# system() executes shell commands, getline can pipe from commands,
+# ENVIRON exposes environment variables (may contain secrets)
+AWK_DANGEROUS_PATTERNS = re.compile(r'\bsystem\s*\(|\|\s*getline|\bgetline\s*<|\bENVIRON\b')
 
 # ffmpeg options that can be used for data exfiltration or other dangerous operations
 # in "safe" network mode. These are blocked unless network_mode="all"
@@ -2358,7 +2368,8 @@ shed_exec(zone="storage", cmd="some_cmd", args=["..."],
                     "ARGUMENT_FORBIDDEN",
                     f"Dangerous argument detected",
                     {"argument": arg_str},
-                    "Characters ; | & && || > >> < << $( ${ ` are forbidden"
+                    "Characters ; | & && || > >> << $( ${ ` are forbidden. "
+                    "Use < for comparisons. To save output to a file, use stdout_file parameter instead of >"
                 )
             
             # Block URLs (network access via ffmpeg, pandoc, imagemagick, etc.)
@@ -2887,6 +2898,26 @@ shed_exec(zone="storage", cmd="some_cmd", args=["..."],
         except OSError:
             pass  # Ignore errors when releasing lock
 
+    def _check_file_not_locked(self, editzone_base: Path, path: str, conv_id: str) -> None:
+        """
+        Checks if a file is locked by another conversation.
+        Raises FILE_LOCKED if the file is locked by a different conversation.
+        Used by shed_delete and shed_rename to prevent operations on locked files.
+        """
+        lock_path = self._get_lock_path(editzone_base, path)
+        if lock_path.exists():
+            try:
+                lock_data = json.loads(lock_path.read_text())
+                if lock_data.get("conv_id") != conv_id:
+                    raise StorageError(
+                        "FILE_LOCKED",
+                        "File locked by another conversation",
+                        {"locked_at": lock_data.get("locked_at")},
+                        "Wait for the other session to release the lock or use shed_force_unlock()"
+                    )
+            except (json.JSONDecodeError, OSError, PermissionError):
+                pass  # Corrupted or unreadable lock, allow operation
+
     def _validate_content_size(self, content: str) -> None:
         """Checks that content doesn't exceed max size."""
         max_bytes = self.valves.max_file_size_mb * 1024 * 1024
@@ -3138,6 +3169,16 @@ shed_exec(zone="storage", cmd="some_cmd", args=["..."],
                 "GROUP_NOT_AVAILABLE",
                 "Group features are not available",
                 hint="Open WebUI Groups API not found"
+            )
+
+        # Check if group exists first
+        group_obj = Groups.get_group_by_id(group_id)
+        if group_obj is None:
+            raise StorageError(
+                "GROUP_NOT_FOUND",
+                f"Group not found: '{group_id}'",
+                {"group_id": group_id},
+                "Check the group name or ID"
             )
 
         if __user__ is None:
@@ -3649,6 +3690,11 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
             __metadata__ = {}
         user_id = __user__.get("id", "")
         conv_id = self._get_conv_id(__metadata__)
+
+        # Early validation
+        if not path or path.strip() == "":
+            raise StorageError("MISSING_PARAMETER", "Path parameter is required")
+
         zone_lower = zone.lower()
 
         # === ZONE RESOLUTION ===
@@ -3676,8 +3722,10 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
             editzone_base = self._get_groups_root() / group_id
             git_commit = True
             zone_name = f"Group:{group_id}"
+        elif zone_lower == "uploads":
+            raise StorageError("ZONE_READONLY", "Uploads zone is read-only", hint="Use storage or documents zone for writing")
         else:
-            raise StorageError("ZONE_FORBIDDEN", f"Invalid zone: {zone}")
+            raise StorageError("INVALID_ZONE", f"Invalid zone: {zone}", hint="Use one of: uploads, storage, documents, group")
 
         self._ensure_dir(zone_root)
         path = self._validate_relative_path(path, zone_name, allow_zone_in_path)
@@ -3690,6 +3738,9 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
                 raise StorageError(error, f"Cannot write to file: {error}")
         
         # === VALIDATE PARAMETERS ===
+        if content is None:
+            raise StorageError("MISSING_PARAMETER", "Content parameter is required")
+
         valid_positions = ("start", "end", "before", "after", "replace")
         if position not in valid_positions:
             hint = ""
@@ -3702,18 +3753,16 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
                 f"Invalid position: {position}. Valid: {', '.join(valid_positions)}{hint}"
             )
         
-        # Treat 0 as None (LLMs sometimes pass 0 instead of omitting the parameter)
-        if line == 0:
-            line = None
-        if end_line == 0:
-            end_line = None
-        
+        # Validate line parameter early - line=0 is explicitly invalid
+        if line is not None and line < 1:
+            raise StorageError("INVALID_PARAMETER", "Line must be >= 1 (first line is 1, not 0)")
+
+        if end_line is not None and end_line < 1:
+            raise StorageError("INVALID_PARAMETER", "end_line must be >= 1 (first line is 1, not 0)")
+
         if not overwrite and position in ("before", "after", "replace"):
             if line is None and pattern is None:
                 raise StorageError("MISSING_PARAMETER", f"Position '{position}' requires 'line' or 'pattern'")
-        
-        if line is not None and line < 1:
-            raise StorageError("INVALID_PARAMETER", "Line must be >= 1 (first line is 1, not 0)")
         
         if end_line is not None and position != "replace":
             raise StorageError("INVALID_PARAMETER", "end_line only valid with position='replace'")
@@ -3724,6 +3773,8 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
         # === COMPILE REGEX ===
         compiled_pattern = None
         if pattern is not None:
+            if pattern == "":
+                raise StorageError("INVALID_PARAMETER", "Pattern cannot be empty")
             flags = 0
             for c in regex_flags.lower():
                 if c == 'i': flags |= re.IGNORECASE
@@ -3737,7 +3788,10 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
         # === CHECK FILE EXISTS ===
         file_exists = target_path.exists()
         file_created = False
-        
+
+        if file_exists and target_path.is_dir():
+            raise StorageError("NOT_A_FILE", f"Path is a directory, not a file: {path}")
+
         if not file_exists:
             if overwrite or position in ("start", "end"):
                 file_created = True
@@ -3857,19 +3911,24 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
                     lines_affected = end_idx - start_idx + 1
                     lines = lines[:start_idx] + [content] + lines[end_idx + 1:]
                 else:
-                    new_lines = []
-                    found = False
-                    for l in lines:
-                        if compiled_pattern.search(l) and (not found or match_all):
-                            new_lines.append(content)
-                            lines_affected += 1
-                            match_count += 1
-                            found = True
-                        else:
-                            new_lines.append(l)
-                    if not found:
+                    # Search and replace in full content (supports multiline patterns)
+                    full_content = ''.join(lines)
+                    if not compiled_pattern.search(full_content):
                         raise StorageError("PATTERN_NOT_FOUND", f"Pattern not found: {pattern}")
-                    lines = new_lines
+
+                    # Count replacements and perform substitution
+                    if match_all:
+                        new_content, match_count = compiled_pattern.subn(content, full_content)
+                    else:
+                        new_content, match_count = compiled_pattern.subn(content, full_content, count=1)
+
+                    lines_affected = match_count
+                    # Split back into lines, preserving line structure
+                    if new_content.endswith('\n'):
+                        lines = [l + '\n' for l in new_content[:-1].split('\n')]
+                    else:
+                        parts = new_content.split('\n')
+                        lines = [l + '\n' for l in parts[:-1]] + [parts[-1]] if len(parts) > 1 else [new_content]
             
             # === WRITE RESULT ===
             with open(working_path, 'w', encoding='utf-8') as f:
@@ -3950,6 +4009,13 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
             __metadata__ = {}
         user_id = __user__.get("id", "")
         conv_id = self._get_conv_id(__metadata__)
+
+        # Early validation
+        if content is None:
+            raise StorageError("MISSING_PARAMETER", "Content parameter is required")
+        if not path or path.strip() == "":
+            raise StorageError("MISSING_PARAMETER", "Path parameter is required")
+
         zone_lower = zone.lower()
 
         # === PARSE CONTENT ===
@@ -3993,8 +4059,10 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
             editzone_base = self._get_groups_root() / group_id
             git_commit = True
             zone_name = f"Group:{group_id}"
+        elif zone_lower == "uploads":
+            raise StorageError("ZONE_READONLY", "Uploads zone is read-only", hint="Use storage or documents zone for writing")
         else:
-            raise StorageError("ZONE_FORBIDDEN", f"Invalid zone: {zone}")
+            raise StorageError("INVALID_ZONE", f"Invalid zone: {zone}", hint="Use one of: uploads, storage, documents, group")
 
         self._ensure_dir(zone_root)
         path = self._validate_relative_path(path, zone_name, allow_zone_in_path)
@@ -4518,7 +4586,8 @@ class Tools:
         :param pattern: Regex pattern for "replace"
         :param regex_flags: Regex flags (i=ignore case, m=multiline, s=dotall)
         :param match_all: Replace all pattern matches (default: first only)
-        :param overwrite: Set to True to replace entire file (use this, NOT position="overwrite")
+        :param overwrite: True=replace entire file content, False=patch at position (default: False).
+                          Note: overwrite=False on existing file APPENDS/PATCHES, does NOT fail!
         :param safe: Lock file during edit
         :param group: Group name/ID (required if zone="group")
         :param message: Git commit message (documents/group only, ignored for storage)
@@ -4635,10 +4704,19 @@ class Tools:
 
             path = self._core._validate_relative_path(path, ctx.zone_name, allow_zone_in_path)
             target = self._core._resolve_chroot_path(ctx.zone_root, path)
-            
+
+            # Prevent deleting the zone root itself
+            if target.resolve() == ctx.zone_root.resolve():
+                raise StorageError("INVALID_PATH", "Cannot delete zone root", hint="Specify a file or folder within the zone")
+
             if not target.exists():
                 raise StorageError("FILE_NOT_FOUND", f"Path not found: {path}")
-            
+
+            # Check if file is locked by another conversation
+            # (skip for uploads which have no editzone_base, and for directories)
+            if ctx.editzone_base and not target.is_dir():
+                self._core._check_file_not_locked(ctx.editzone_base, path, ctx.conv_id)
+
             # Group: check delete permission
             user_id = __user__.get("id", "")
             if ctx.group_id:
@@ -4714,7 +4792,11 @@ class Tools:
             
             if not old_target.exists():
                 raise StorageError("FILE_NOT_FOUND", f"Source not found: {old_path}")
-            
+
+            # Check if file is locked by another conversation (skip for directories)
+            if ctx.editzone_base and not old_target.is_dir():
+                self._core._check_file_not_locked(ctx.editzone_base, old_path, ctx.conv_id)
+
             if new_target.exists():
                 raise StorageError("FILE_EXISTS", f"Destination exists: {new_path}")
             
@@ -6024,7 +6106,7 @@ class Tools:
                     else:
                         try:
                             size = item.stat().st_size
-                            size_str = self._format_size(size, short=True)
+                            size_str = self._core._format_size(size, short=True)
                         except (OSError, FileNotFoundError):
                             size_str = "?"
                         lines.append(f"{prefix}{connector}{item.name} ({size_str})")
