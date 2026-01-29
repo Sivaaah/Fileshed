@@ -418,10 +418,17 @@ shed_patch_text(zone="storage", path="projects/2024/.keep", content="")
 
 ## Installation
 
-1. Copy `Fileshed.py` to your Open WebUI tools directory
-2. Enable the tool in Admin Panel → Tools
-3. **Important:** Enable Native Function Calling:
-   - Admin Panel → Settings → Models → [Select Model] → Advanced Parameters → Function Calling → "Native"
+1. In Open WebUI, go to **Workspace > Tools** (not Admin Panel!)
+2. Click **"+"** or **"Create Tool"** and paste the content of `Fileshed.py`
+3. Save the tool
+4. **Important:** Enable Native Function Calling for your model:
+   - Go to **Admin Panel > Settings > Models > [Select Model] > Advanced Parameters**
+   - Set **Function Calling** to **"Native"**
+5. In a new chat, click the **"+"** button next to the message input and enable **Fileshed**
+
+> ⚠️ **Note:** Tools are different from Functions in Open WebUI:
+> - **Tools** (Workspace) = Give LLMs new capabilities (like Fileshed)
+> - **Functions** (Admin Panel) = Extend the platform itself (filters, custom models)
 
 ---
 
