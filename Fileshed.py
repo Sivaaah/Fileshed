@@ -385,7 +385,7 @@ class _OpenWebUIBridge:
             cls._instance = super().__new__(cls)
         return cls._instance
     
-    def _ensure_initialized(self):
+    def _ensure_initialized(self) -> bool:
         """Lazy initialization of Open WebUI imports."""
         if self._initialized:
             return True
@@ -424,7 +424,7 @@ class _OpenWebUIBridge:
         content_type: str,
         file_size: int,
         metadata: dict = None
-    ):
+    ) -> Any:
         """
         Insert a new file into Open WebUI's file system.
         
@@ -468,7 +468,7 @@ class _OpenWebUIBridge:
                 {"file_id": file_id, "error": str(e)}
             )
     
-    def get_file_by_id(self, file_id: str):
+    def get_file_by_id(self, file_id: str) -> Any:
         """Get file metadata by ID."""
         self._ensure_initialized()
         try:
@@ -479,8 +479,8 @@ class _OpenWebUIBridge:
                 f"Failed to get file from Open WebUI: {e}",
                 {"file_id": file_id, "error": str(e)}
             )
-    
-    def delete_file_by_id(self, file_id: str):
+
+    def delete_file_by_id(self, file_id: str) -> Any:
         """Delete a file by ID."""
         self._ensure_initialized()
         try:
@@ -2442,6 +2442,24 @@ shed_exec(zone="storage", cmd="some_cmd", args=["..."],
                  "allowed_write": sorted(GIT_WHITELIST_WRITE)}
             )
 
+    def _calculate_effective_max(self, max_output: int) -> int:
+        """Calculate effective max output size based on user parameter and valve limits."""
+        if max_output is None:
+            return self.valves.max_output_default
+        elif max_output == 0:
+            return self.valves.max_output_absolute
+        else:
+            return min(max_output, self.valves.max_output_absolute)
+
+    def _truncate_output(self, output: str, effective_max: int) -> tuple:
+        """Truncate output if it exceeds effective_max. Returns (output, was_truncated)."""
+        if not output:
+            return "", False
+        if len(output) > effective_max:
+            truncated = output[:effective_max] + f"\n\n... [TRUNCATED - {len(output)} bytes total, showing first {effective_max}] ..."
+            return truncated, True
+        return output, False
+
     def _exec_command(
         self, 
         cmd: str, 
@@ -2465,11 +2483,13 @@ shed_exec(zone="storage", cmd="some_cmd", args=["..."],
             stderr_file: Path to redirect stderr to (None=capture in memory)
             redirect_stderr_to_stdout: If True, redirect stderr to stdout (2>&1)
         """
+        # Pre-compute args_str once for all checks
+        args_str = " ".join(str(a) for a in args)
+
         # Handle tar extraction: add --no-same-owner to prevent ownership errors
         # This avoids "Cannot change ownership" errors that cause tar to return code 2
         # even though files are extracted successfully
         if cmd == "tar":
-            args_str = " ".join(str(a) for a in args)
             is_extraction = any(x in args_str for x in ["-x", "--extract"])
             # Also check combined flags like -xJf, -xzf, etc.
             if not is_extraction:
@@ -2480,11 +2500,10 @@ shed_exec(zone="storage", cmd="some_cmd", args=["..."],
                         break
             if is_extraction and "--no-same-owner" not in args_str:
                 args = ["--no-same-owner"] + list(args)
-        
+
         # Handle curl: require -o/--output to prevent stdout pollution
         # Also add -sS to suppress progress but show errors
         if cmd == "curl":
-            args_str = " ".join(str(a) for a in args)
             # Check for output redirection (allow if stdout_file is specified)
             has_output = any(x in args_str for x in ["-o", "--output", "-O", "--remote-name"]) or stdout_file
             if not has_output:
@@ -2496,11 +2515,10 @@ shed_exec(zone="storage", cmd="some_cmd", args=["..."],
                 )
             if "-s" not in args_str and "--silent" not in args_str:
                 args = ["-sS"] + list(args)  # -s=silent, -S=show-error
-        
+
         # Handle wget: require -O/--output-document to prevent stdout pollution
         # Also add -q to suppress progress
         if cmd == "wget":
-            args_str = " ".join(str(a) for a in args)
             # Check for output redirection (allow if stdout_file is specified)
             has_output = any(x in args_str for x in ["-O", "--output-document"]) or stdout_file
             if not has_output:
@@ -2580,20 +2598,9 @@ shed_exec(zone="storage", cmd="some_cmd", args=["..."],
                 stdout = f"[Output written to {stdout_file.name}]"
                 stdout_truncated = False
             else:
-                # Truncate stdout if too long (prevents context pollution)
-                if max_output is None:
-                    effective_max = self.valves.max_output_default
-                elif max_output == 0:
-                    effective_max = self.valves.max_output_absolute
-                else:
-                    effective_max = min(max_output, self.valves.max_output_absolute)
-                
-                stdout = result.stdout or ""
-                stdout_truncated = False
-                if len(stdout) > effective_max:
-                    stdout = stdout[:effective_max] + f"\n\n... [TRUNCATED - {len(result.stdout)} bytes total, showing first {effective_max}] ..."
-                    stdout_truncated = True
-            
+                effective_max = self._calculate_effective_max(max_output)
+                stdout, stdout_truncated = self._truncate_output(result.stdout or "", effective_max)
+
             # Get stderr content
             if stderr_file:
                 stderr = f"[Errors written to {stderr_file.name}]"
@@ -2602,18 +2609,8 @@ shed_exec(zone="storage", cmd="some_cmd", args=["..."],
                 stderr = ""
                 stderr_truncated = False
             else:
-                if max_output is None:
-                    effective_max = self.valves.max_output_default
-                elif max_output == 0:
-                    effective_max = self.valves.max_output_absolute
-                else:
-                    effective_max = min(max_output, self.valves.max_output_absolute)
-                
-                stderr = result.stderr or ""
-                stderr_truncated = False
-                if len(stderr) > effective_max:
-                    stderr = stderr[:effective_max] + f"\n\n... [TRUNCATED - {len(result.stderr)} bytes total, showing first {effective_max}] ..."
-                    stderr_truncated = True
+                effective_max = self._calculate_effective_max(max_output)
+                stderr, stderr_truncated = self._truncate_output(result.stderr or "", effective_max)
             
             response = {
                 "success": result.returncode == 0,
