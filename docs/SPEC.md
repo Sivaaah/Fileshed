@@ -221,9 +221,10 @@ Some parameters only apply to certain zones and are ignored otherwise:
 
 ### Function Categories
 
-**Core Operations (10 functions):**
+**Core Operations (11 functions):**
 
 - `shed_exec` — Execute shell commands (including reading files with cat/head/tail, stdout_file= for output redirection)
+- `shed_create_file` — Create or overwrite files (wrapper for patch functions, intuitive to use)
 - `shed_patch_text` — Write/create text files (THE standard write function)
 - `shed_patch_bytes` — Write binary data to files
 - `shed_delete` — Delete files/folders

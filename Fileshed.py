@@ -4682,20 +4682,31 @@ class Tools:
 
         # Delegate to appropriate patch function with overwrite=True
         if file_type_lower == "bytes":
-            return await self.shed_patch_bytes(
+            result = await self.shed_patch_bytes(
                 zone=zone, path=path, content=content,
                 content_format=content_format, overwrite=True,
                 group=group, message=message, mode=mode,
                 allow_zone_in_path=allow_zone_in_path,
                 __user__=__user__, __metadata__=__metadata__,
             )
+        else:
+            result = await self.shed_patch_text(
+                zone=zone, path=path, content=content,
+                overwrite=True, group=group, message=message, mode=mode,
+                allow_zone_in_path=allow_zone_in_path,
+                __user__=__user__, __metadata__=__metadata__,
+            )
 
-        return await self.shed_patch_text(
-            zone=zone, path=path, content=content,
-            overwrite=True, group=group, message=message, mode=mode,
-            allow_zone_in_path=allow_zone_in_path,
-            __user__=__user__, __metadata__=__metadata__,
-        )
+        # Add hint explaining this is a wrapper function
+        try:
+            import json
+            parsed = json.loads(result)
+            if parsed.get("success"):
+                parsed["hint"] = "shed_create_file is a wrapper for shed_patch_text/bytes with overwrite=True. It exists because it's intuitive to find and use."
+                return json.dumps(parsed)
+        except (json.JSONDecodeError, TypeError):
+            pass
+        return result
 
     async def shed_patch_text(
         self,
@@ -7495,7 +7506,8 @@ class Tools:
             
             # Block dangerous operations
             # Strip comments first to prevent bypass attacks like AT/**/TACH
-            query_no_comments = self._core._strip_sql_comments(query_stripped)
+            # Convert to uppercase to prevent case-based bypass (e.g., "attach" instead of "ATTACH")
+            query_no_comments = self._core._strip_sql_comments(query_stripped).upper()
             dangerous_patterns = [
                 "ATTACH", "DETACH",  # Could access other databases
                 "LOAD_EXTENSION",    # Could load malicious code

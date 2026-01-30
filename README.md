@@ -9,7 +9,7 @@
 [![Version](https://img.shields.io/badge/version-1.0.3-blue.svg)]()
 [![Open WebUI](https://img.shields.io/badge/Open%20WebUI-Tool-green.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-lightgrey.svg)]()
-[![Tests](https://img.shields.io/badge/tests-1086%20passed-brightgreen.svg)](docs/audits/fileshed/reports/Exec_tests.md)
+[![Tests](https://img.shields.io/badge/tests-1091%20passed-brightgreen.svg)](docs/audits/fileshed/reports/Exec_tests.md)
 [![Audited](https://img.shields.io/badge/audited-★★★★☆-blue.svg)](#testing--audits)
 
 ---
@@ -494,7 +494,7 @@ Fileshed has been independently audited by multiple AI models and validated with
 
 All issues identified during audits have been addressed.
 
-**Test coverage:** [1086 functional tests](docs/audits/fileshed/reports/Exec_tests.md) — All passing
+**Test coverage:** [1091 functional tests](docs/audits/fileshed/reports/Exec_tests.md) — All passing
 
 ---
 
@@ -514,7 +514,7 @@ Some features require additional tools installed in the Open WebUI container:
 **Without these tools, you can still:**
 - Convert between markdown, docx, html, LaTeX source (via pandoc)
 - Process media with ffmpeg
-- Use all 37 Fileshed functions
+- Use all 38 Fileshed functions
 
 ---
 
