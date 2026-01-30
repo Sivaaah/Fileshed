@@ -577,6 +577,19 @@ class _FileshedCore:
     
     FUNCTION_HELP = {
         # === DIRECT WRITE FUNCTIONS ===
+        "shed_create_file": {
+            "usage": "shed_create_file(zone, path, content, file_type='text', content_format='hex')",
+            "desc": "Create or overwrite a file. Simplest way to write a file!",
+            "workflows": ["Direct Write"],
+            "howtos": ["edit"],
+            "not_for": ["Appending to file (use shed_patch_text)", "Patching specific lines (use shed_patch_text)"],
+            "tips": [
+                "Creates parent directories automatically",
+                "file_type='text' (default) or 'bytes'",
+                "For bytes: content_format='hex' (default), 'base64', or 'raw'",
+                "For appending: use shed_patch_text(zone, path, content) instead",
+            ],
+        },
         "shed_patch_text": {
             "usage": "shed_patch_text(zone, path, content, position='end', overwrite=False, ...)",
             "desc": "THE standard function to write/create text files. Use this for all file writing!",
@@ -584,12 +597,11 @@ class _FileshedCore:
             "howtos": ["edit"],
             "not_for": ["Locked Edit workflow (shed_lockedit_*)"],
             "tips": [
-                "Create new file: shed_patch_text(zone, path, content, overwrite=True)",
+                "💡 To CREATE a file: use shed_create_file(zone, path, content) instead!",
                 "Append to file: shed_patch_text(zone, path, content)  # position='end' by default",
                 "To READ files: use shed_exec(cmd='cat', args=['file']) or head/tail/sed",
                 "⚠️ CSV: quote fields with comma/newline/quotes. Escape quotes by doubling: \"\"",
                 "position: 'start', 'end', 'before', 'after', 'replace' (NOT 'at' - that's for bytes!)",
-                "⚠️ overwrite is a PARAM (overwrite=True), NOT a position value (position='overwrite' is WRONG)",
                 "For 'before'/'after'/'replace': use line=N (first line is 1) or pattern='...'",
             ],
         },
@@ -4046,6 +4058,7 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
         offset: int,
         length: int,
         content_format: str,
+        overwrite: bool,
         safe: bool,
         group: str,
         message: str,
@@ -4129,20 +4142,21 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
                 raise StorageError(error, f"Cannot write to file: {error}")
         
         # === VALIDATE PARAMETERS ===
+        # Skip position/offset/length validation when overwrite=True (these params are ignored)
         valid_positions = ("start", "end", "at", "replace")
-        if position not in valid_positions:
+        if not overwrite and position not in valid_positions:
             hint = ""
             if position == "overwrite":
                 hint = ". To overwrite entire file, use overwrite=True parameter instead"
             raise StorageError(
-                "INVALID_PARAMETER", 
+                "INVALID_PARAMETER",
                 f"Invalid position: {position}. Valid: {', '.join(valid_positions)}{hint}"
             )
-        
-        if position in ("at", "replace") and offset is None:
+
+        if not overwrite and position in ("at", "replace") and offset is None:
             raise StorageError("MISSING_PARAMETER", f"Position '{position}' requires 'offset'")
 
-        if position == "replace" and length is None:
+        if not overwrite and position == "replace" and length is None:
             raise StorageError("MISSING_PARAMETER", "Position 'replace' requires 'length'")
 
         # LLM Guardrail: validate types before comparison
@@ -4235,7 +4249,10 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
             bytes_affected = len(content_bytes)
             
             # === PERFORM EDIT ===
-            if position == "start":
+            if overwrite:
+                # Complete file replacement
+                data = bytearray(content_bytes)
+            elif position == "start":
                 data = bytearray(content_bytes) + data
             elif position == "end":
                 data.extend(content_bytes)
@@ -4274,7 +4291,7 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
             result = {
                 "path": path,
                 "zone": zone,
-                "position": position,
+                "position": "overwrite" if overwrite else position,
                 "bytes_written": len(content_bytes),
                 "bytes_affected": bytes_affected,
                 "created": file_created,
@@ -4282,13 +4299,14 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
                 "safe_mode": safe,
                 "content_format": content_format,
             }
-            if offset is not None:
+            if offset is not None and not overwrite:
                 result["offset"] = offset
             if group_id:
                 result["group"] = group_id
-            
-            return self._format_response(True, data=result, 
-                message=f"File {'created' if file_created else 'patched'}: {len(content_bytes)} bytes written")
+
+            action = "created" if file_created else ("overwritten" if overwrite else "patched")
+            return self._format_response(True, data=result,
+                message=f"File {action}: {len(content_bytes)} bytes written")
             
         finally:
             # Cleanup on error: release lock and remove editzone if it wasn't moved
@@ -4620,6 +4638,69 @@ class Tools:
         except Exception:
             return self._core._format_response(False, message="Unexpected error during command execution")
 
+    async def shed_create_file(
+        self,
+        zone: str,
+        path: str,
+        content: str,
+        file_type: str = "text",
+        content_format: str = "hex",
+        group: str = None,
+        message: str = None,
+        mode: str = None,
+        allow_zone_in_path: bool = False,
+        __user__: dict = None,
+        __metadata__: dict = None,
+    ) -> str:
+        """
+        Create a new file or overwrite an existing file with the given content.
+
+        This is the simplest way to write a file. For appending or patching, use shed_patch_text/bytes.
+
+        :param zone: Target zone ("storage", "documents", or "group")
+        :param path: File path relative to zone (don't include zone name!)
+        :param content: File content (text string, or encoded binary if file_type="bytes")
+        :param file_type: "text" (default) or "bytes"
+        :param content_format: For bytes only: "hex" (default), "base64", or "raw"
+        :param group: Group name/ID (required if zone="group")
+        :param message: Git commit message (documents/group only)
+        :param mode: Ownership mode for new files in group: "owner", "group", "owner_ro"
+        :param allow_zone_in_path: Allow path starting with zone name (default: False)
+        :return: Creation result as JSON
+
+        Examples:
+            shed_create_file(zone="storage", path="hello.txt", content="Hello, world!")
+            shed_create_file(zone="documents", path="README.md", content="# My Project", message="Init")
+            shed_create_file(zone="storage", path="data.bin", content="48454C4C4F", file_type="bytes")
+            shed_create_file(zone="storage", path="img.png", content="iVBORw0K...", file_type="bytes", content_format="base64")
+        """
+        # Validate file_type
+        file_type_lower = file_type.lower() if isinstance(file_type, str) else ""
+        if file_type_lower not in ("text", "bytes"):
+            return self._core._format_response(
+                False,
+                error="INVALID_PARAMETER",
+                message=f"file_type must be 'text' or 'bytes', got: {repr(file_type)}",
+                hint="Use file_type='text' for text files or file_type='bytes' for binary"
+            )
+
+        # Delegate to appropriate patch function with overwrite=True
+        if file_type_lower == "bytes":
+            return await self.shed_patch_bytes(
+                zone=zone, path=path, content=content,
+                content_format=content_format, overwrite=True,
+                group=group, message=message, mode=mode,
+                allow_zone_in_path=allow_zone_in_path,
+                __user__=__user__, __metadata__=__metadata__,
+            )
+
+        return await self.shed_patch_text(
+            zone=zone, path=path, content=content,
+            overwrite=True, group=group, message=message, mode=mode,
+            allow_zone_in_path=allow_zone_in_path,
+            __user__=__user__, __metadata__=__metadata__,
+        )
+
     async def shed_patch_text(
         self,
         zone: str,
@@ -4694,6 +4775,7 @@ class Tools:
         position: str = "end",
         offset: int = None,
         length: int = None,
+        overwrite: bool = False,
         safe: bool = True,
         group: str = None,
         message: str = None,
@@ -4709,9 +4791,10 @@ class Tools:
         :param path: File path relative to zone (don't include zone name!)
         :param content: Content to write (format depends on content_format)
         :param content_format: "hex" (default), "base64", or "raw"
-        :param position: "start", "end", "at", or "replace"
+        :param position: "start", "end", "at", or "replace" (ignored if overwrite=True)
         :param offset: Byte offset for "at"/"replace"
         :param length: Bytes to replace for "replace"
+        :param overwrite: True=replace entire file, False=patch at position (default: False)
         :param safe: Lock file during edit
         :param group: Group name/ID (required if zone="group")
         :param message: Git commit message (documents/group only)
@@ -4721,13 +4804,13 @@ class Tools:
 
         Examples:
             shed_patch_bytes(zone="storage", path="data.bin", content="48454C4C4F")
-            shed_patch_bytes(zone="storage", path="img.png", content="89504E47", position="start")
+            shed_patch_bytes(zone="storage", path="img.png", content="89504E47", overwrite=True)
         """
         try:
             return await self._core._patch_bytes_impl(
                 zone=zone, path=path, content=content,
                 content_format=content_format, position=position,
-                offset=offset, length=length, safe=safe,
+                offset=offset, length=length, overwrite=overwrite, safe=safe,
                 group=group, message=message, mode=mode,
                 allow_zone_in_path=allow_zone_in_path,
                 __user__=__user__, __metadata__=__metadata__,

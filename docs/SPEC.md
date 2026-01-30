@@ -125,7 +125,7 @@ All internal methods are in a separate `_FileshedCore` class, preventing the LLM
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                  class Tools (PUBLIC API)                       │
-│              async def shed_*() — 37 functions                  │
+│              async def shed_*() — 38 functions                  │
 │                                                                 │
 │  These are the ONLY functions visible to the LLM.               │
 │  Handle: parameter validation, zone resolution, response format │
@@ -276,7 +276,7 @@ Some parameters only apply to certain zones and are ignored otherwise:
 - `shed_allowed_commands` — List allowed shell commands
 - `shed_maintenance` — Cleanup expired locks
 
-**Total: 37 functions**
+**Total: 38 functions**
 
 ## Group permissions
 

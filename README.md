@@ -353,11 +353,12 @@ shed_patch_text(zone="storage", path="projects/2024/.keep", content="")
 |----------|-------------|
 | `shed_exec(zone, cmd, args=[], stdout_file=None, stderr_file=None, group=None)` | Execute shell commands (use cat/head/tail to READ files, stdout_file= to redirect output) |
 
-### File Writing (2 functions)
+### File Writing (3 functions)
 
 | Function | Description |
 |----------|-------------|
-| `shed_patch_text(zone, path, content, ...)` | THE standard function to write/create text files |
+| `shed_create_file(zone, path, content, ...)` | Create or overwrite a file (simplest way!) |
+| `shed_patch_text(zone, path, content, ...)` | Append, insert, or replace text in files |
 | `shed_patch_bytes(zone, path, content, ...)` | Write binary data to files |
 
 ### File Operations (3 functions)
@@ -439,7 +440,7 @@ shed_patch_text(zone="storage", path="projects/2024/.keep", content="")
 | `shed_allowed_commands()` | List allowed shell commands |
 | `shed_maintenance()` | Cleanup expired locks |
 
-**Total: 37 functions**
+**Total: 38 functions**
 
 ---
 
