@@ -589,6 +589,7 @@ class _FileshedCore:
                 "To READ files: use shed_exec(cmd='cat', args=['file']) or head/tail/sed",
                 "⚠️ CSV: quote fields with comma/newline/quotes. Escape quotes by doubling: \"\"",
                 "position: 'start', 'end', 'before', 'after', 'replace' (NOT 'at' - that's for bytes!)",
+                "⚠️ overwrite is a PARAM (overwrite=True), NOT a position value (position='overwrite' is WRONG)",
                 "For 'before'/'after'/'replace': use line=N (first line is 1) or pattern='...'",
             ],
         },
@@ -3772,19 +3773,18 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
         if content is None:
             raise StorageError("MISSING_PARAMETER", "Content parameter is required")
 
+        # Skip position/line/end_line/pattern validation when overwrite=True (these params are ignored)
         valid_positions = ("start", "end", "before", "after", "replace")
-        if position not in valid_positions:
+        if not overwrite and position not in valid_positions:
             hint = ""
             if position == "overwrite":
                 hint = ". To overwrite entire file, use overwrite=True parameter instead"
             elif position == "at":
                 hint = ". 'at' is for shed_patch_bytes (binary). For text, use 'before' or 'after' with line=N"
             raise StorageError(
-                "INVALID_PARAMETER", 
+                "INVALID_PARAMETER",
                 f"Invalid position: {position}. Valid: {', '.join(valid_positions)}{hint}"
             )
-        
-        # Skip line/end_line/pattern validation when overwrite=True (these params are ignored)
         if not overwrite:
             # LLM Guardrail: validate types before comparison
             if line is not None and not isinstance(line, int):
