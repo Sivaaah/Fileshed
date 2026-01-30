@@ -1,6 +1,6 @@
 """
 title: Fileshed
-description: Persistent file storage with group collaboration. FIRST: Run shed_help() for quick reference or shed_help(howto="...") for guides: download, csv_to_sqlite, upload, share, edit, commands, network, paths, full. Config: shed_parameters().
+description: Persistent file storage with group collaboration. FIRST: Run shed_help() for quick reference or shed_help(howto="...") for guides: download, csv_to_sqlite, upload, share, edit, commands, network, paths, large_files, full. Config: shed_parameters().
 author: Fade78 (with Claude Opus 4.5)
 version: 1.0.3
 license: MIT
@@ -215,12 +215,12 @@ WHITELIST_READWRITE = WHITELIST_READONLY | {
     "date", "cal",
     # Additional paths
     "readlink", "pathchk", "pwd",
-    # System (info only - env removed, can execute commands)
-    "uname", "nproc", "printenv",
+    # System (info only - env/printenv removed, can expose secrets)
+    "uname", "nproc",
     # Control (timeout removed - can execute commands, we have internal timeout)
     "sleep",
-    # Misc (xargs removed - can execute arbitrary commands)
-    "yes", "tee", "envsubst", "gettext", "tsort", "true", "false",
+    # Misc (xargs removed - can execute arbitrary commands, envsubst removed - exposes env vars)
+    "yes", "tee", "gettext", "tsort", "true", "false",
     # Media
     "ffmpeg", "magick", "convert",
     # Versioning
@@ -3048,15 +3048,7 @@ shed_exec(zone="storage", cmd="some_cmd", args=["..."],
         Layer 2: Checks if a command is available on the system.
         Used for introspection (shed_allowed_commands).
         """
-        try:
-            result = subprocess.run(
-                ["which", cmd],
-                capture_output=True,
-                timeout=5,
-            )
-            return result.returncode == 0
-        except Exception:
-            return False
+        return shutil.which(cmd) is not None
 
     def _init_git_repo(self, repo_path: Path) -> None:
         """Initializes a Git repository if needed."""
@@ -4702,12 +4694,20 @@ class Tools:
             # uploads allows delete even though readonly for other ops
             ctx = self._core._resolve_zone(zone, group, __user__, __metadata__, require_write=False)
 
+            # Check for empty path first
+            if not path or path.strip() == "":
+                raise StorageError("MISSING_PARAMETER", "Path parameter is required")
+
             path = self._core._validate_relative_path(path, ctx.zone_name, allow_zone_in_path)
             target = self._core._resolve_chroot_path(ctx.zone_root, path)
 
             # Prevent deleting the zone root itself
             if target.resolve() == ctx.zone_root.resolve():
                 raise StorageError("INVALID_PATH", "Cannot delete zone root", hint="Specify a file or folder within the zone")
+
+            # Protect .git directory in versioned zones (documents, groups)
+            if path == ".git" or path.startswith(".git/"):
+                raise StorageError("PROTECTED_PATH", "Cannot delete .git directory", hint="The .git directory is required for version control")
 
             if not target.exists():
                 raise StorageError("FILE_NOT_FOUND", f"Path not found: {path}")
@@ -4782,14 +4782,21 @@ class Tools:
         try:
             if __user__ is None:
                 __user__ = {}
+
+            # Check for empty paths first
+            if not old_path or old_path.strip() == "":
+                raise StorageError("MISSING_PARAMETER", "old_path parameter is required")
+            if not new_path or new_path.strip() == "":
+                raise StorageError("MISSING_PARAMETER", "new_path parameter is required")
+
             ctx = self._core._resolve_zone(zone, group, __user__, __metadata__, require_write=True)
 
             old_path = self._core._validate_relative_path(old_path, ctx.zone_name, allow_zone_in_path)
             new_path = self._core._validate_relative_path(new_path, ctx.zone_name, allow_zone_in_path)
-            
+
             old_target = self._core._resolve_chroot_path(ctx.zone_root, old_path)
             new_target = self._core._resolve_chroot_path(ctx.zone_root, new_path)
-            
+
             if not old_target.exists():
                 raise StorageError("FILE_NOT_FOUND", f"Source not found: {old_path}")
 
@@ -4867,6 +4874,15 @@ class Tools:
         try:
             if __user__ is None:
                 __user__ = {}
+
+            # Validate path parameter
+            if not path or not path.strip():
+                raise StorageError(
+                    "MISSING_PARAMETER",
+                    "File path is required",
+                    hint="Specify the file to edit: shed_lockedit_open(zone, path)"
+                )
+
             ctx = self._core._resolve_zone(zone, group, __user__, __metadata__, require_write=True)
 
             path = self._core._validate_relative_path(path, ctx.zone_name, allow_zone_in_path)
@@ -4962,13 +4978,21 @@ class Tools:
             args = args or []  # Handle None default
             ctx = self._core._resolve_zone(zone, group, __user__, __metadata__, require_write=True)
 
+            # Validate path parameter
+            if not path or not path.strip():
+                raise StorageError(
+                    "MISSING_PARAMETER",
+                    "File path is required",
+                    hint="Specify the file: shed_lockedit_exec(zone, path, cmd)"
+                )
+
             path = self._core._validate_relative_path(path, ctx.zone_name, allow_zone_in_path)
             user_id = __user__.get("id", "")
-            
+
             # Verify lock ownership
             lock_path = self._core._get_lock_path(ctx.editzone_base, path)
             self._core._check_lock_owner(lock_path, user_id)
-            
+
             # Get editzone path
             editzone_path = self._core._get_editzone_path(ctx.editzone_base, ctx.conv_id, path)
             
@@ -5037,13 +5061,21 @@ class Tools:
                 __user__ = {}
             ctx = self._core._resolve_zone(zone, group, __user__, __metadata__, require_write=True)
 
+            # Validate path parameter
+            if not path or not path.strip():
+                raise StorageError(
+                    "MISSING_PARAMETER",
+                    "File path is required",
+                    hint="Specify the file: shed_lockedit_overwrite(zone, path, content)"
+                )
+
             path = self._core._validate_relative_path(path, ctx.zone_name, allow_zone_in_path)
             user_id = __user__.get("id", "")
-            
+
             # Verify lock ownership
             lock_path = self._core._get_lock_path(ctx.editzone_base, path)
             self._core._check_lock_owner(lock_path, user_id)
-            
+
             # Get editzone path
             editzone_path = self._core._get_editzone_path(ctx.editzone_base, ctx.conv_id, path)
             
@@ -5108,13 +5140,21 @@ class Tools:
                 __user__ = {}
             ctx = self._core._resolve_zone(zone, group, __user__, __metadata__, require_write=True)
 
+            # Validate path parameter
+            if not path or not path.strip():
+                raise StorageError(
+                    "MISSING_PARAMETER",
+                    "File path is required",
+                    hint="Specify the file to save: shed_lockedit_save(zone, path)"
+                )
+
             path = self._core._validate_relative_path(path, ctx.zone_name, allow_zone_in_path)
             user_id = __user__.get("id", "")
-            
+
             # Verify lock ownership
             lock_path = self._core._get_lock_path(ctx.editzone_base, path)
             self._core._check_lock_owner(lock_path, user_id)
-            
+
             # Get paths
             editzone_path = self._core._get_editzone_path(ctx.editzone_base, ctx.conv_id, path)
             target = self._core._resolve_chroot_path(ctx.zone_root, path)
@@ -5187,16 +5227,29 @@ class Tools:
                 __user__ = {}
             ctx = self._core._resolve_zone(zone, group, __user__, __metadata__, require_write=True)
 
+            # Validate path parameter
+            if not path or not path.strip():
+                raise StorageError(
+                    "MISSING_PARAMETER",
+                    "File path is required",
+                    hint="Specify the file to cancel: shed_lockedit_cancel(zone, path)"
+                )
+
             path = self._core._validate_relative_path(path, ctx.zone_name, allow_zone_in_path)
             user_id = __user__.get("id", "")
-            
+
             # Verify lock ownership
             lock_path = self._core._get_lock_path(ctx.editzone_base, path)
             self._core._check_lock_owner(lock_path, user_id)
-            
+
             # Get editzone path
             editzone_path = self._core._get_editzone_path(ctx.editzone_base, ctx.conv_id, path)
-            
+
+            # Verify file is in edit mode (must have lock or editzone file)
+            if not lock_path.exists() and not editzone_path.exists():
+                raise StorageError("NOT_IN_EDIT_MODE", f"File not open for editing: {path}",
+                                   hint="Use shed_lockedit_open() first")
+
             # Cleanup - ensure lock is always released even if cleanup fails
             try:
                 if editzone_path.exists():
@@ -5233,6 +5286,20 @@ class Tools:
         :return: Confirmation as JSON
         """
         try:
+            # Validate required parameters
+            if not src or not src.strip():
+                raise StorageError(
+                    "MISSING_PARAMETER",
+                    "Source path is required",
+                    hint="Specify the source file: shed_move_uploads_to_storage(src, dest)"
+                )
+            if not dest or not dest.strip():
+                raise StorageError(
+                    "MISSING_PARAMETER",
+                    "Destination path is required",
+                    hint="Specify the destination: shed_move_uploads_to_storage(src, dest)"
+                )
+
             user_root = self._core._get_user_root(__user__)
             conv_id = self._core._get_conv_id(__metadata__)
 
@@ -5248,17 +5315,20 @@ class Tools:
             
             if not source.exists():
                 raise StorageError(
-                    "FILE_NOT_FOUND", 
+                    "FILE_NOT_FOUND",
                     f"File not found: {src}",
                     {"path": src, "uploads_dir": str(src_chroot)},
                     "Did you call shed_import(import_all=True) first? Files must be imported before moving."
                 )
-            
+
+            if target.exists():
+                raise StorageError("FILE_EXISTS", f"Destination exists: {dest}")
+
             # No quota check needed: move within user space doesn't change total usage
-            
+
             self._core._ensure_dir(dest_chroot)
             self._core._ensure_dir(target.parent)
-            
+
             shutil.move(str(source), str(target))
             
             return self._core._format_response(True, message=f"Moved: Uploads/{src} -> Storage/{dest}")
@@ -5288,6 +5358,20 @@ class Tools:
         :return: Confirmation as JSON
         """
         try:
+            # Validate required parameters
+            if not src or not src.strip():
+                raise StorageError(
+                    "MISSING_PARAMETER",
+                    "Source path is required",
+                    hint="Specify the source file: shed_move_uploads_to_documents(src, dest)"
+                )
+            if not dest or not dest.strip():
+                raise StorageError(
+                    "MISSING_PARAMETER",
+                    "Destination path is required",
+                    hint="Specify the destination: shed_move_uploads_to_documents(src, dest)"
+                )
+
             user_root = self._core._get_user_root(__user__)
             conv_id = self._core._get_conv_id(__metadata__)
 
@@ -5300,22 +5384,25 @@ class Tools:
 
             source = self._core._resolve_chroot_path(src_chroot, src)
             target = self._core._resolve_chroot_path(dest_chroot, dest)
-            
+
             if not source.exists():
                 raise StorageError(
-                    "FILE_NOT_FOUND", 
+                    "FILE_NOT_FOUND",
                     f"File not found: {src}",
                     {"path": src, "uploads_dir": str(src_chroot)},
                     "Did you call shed_import(import_all=True) first? Files must be imported before moving."
                 )
-            
+
+            if target.exists():
+                raise StorageError("FILE_EXISTS", f"Destination exists: {dest}")
+
             # No quota check needed: move within user space doesn't change total usage
-            
+
             # Init Git
             self._core._init_git_repo(dest_chroot)
-            
+
             self._core._ensure_dir(target.parent)
-            
+
             shutil.move(str(source), str(target))
             
             # Commit
@@ -5349,6 +5436,20 @@ class Tools:
         :return: Confirmation as JSON
         """
         try:
+            # Validate required parameters
+            if not src or not src.strip():
+                raise StorageError(
+                    "MISSING_PARAMETER",
+                    "Source path is required",
+                    hint="Specify the source file: shed_copy_storage_to_documents(src, dest)"
+                )
+            if not dest or not dest.strip():
+                raise StorageError(
+                    "MISSING_PARAMETER",
+                    "Destination path is required",
+                    hint="Specify the destination: shed_copy_storage_to_documents(src, dest)"
+                )
+
             user_root = self._core._get_user_root(__user__)
 
             # Validate paths with zone name check
@@ -5360,18 +5461,21 @@ class Tools:
 
             source = self._core._resolve_chroot_path(src_chroot, src)
             target = self._core._resolve_chroot_path(dest_chroot, dest)
-            
+
             if not source.exists():
                 raise StorageError("FILE_NOT_FOUND", f"File not found: {src}")
-            
+
+            if target.exists():
+                raise StorageError("FILE_EXISTS", f"Destination exists: {dest}")
+
             # Check quota before copy
             self._core._check_quota(__user__, self._core._get_path_size(source))
-            
+
             # Init Git
             self._core._init_git_repo(dest_chroot)
-            
+
             self._core._ensure_dir(target.parent)
-            
+
             if source.is_dir():
                 shutil.copytree(source, target)
             else:
@@ -5408,6 +5512,20 @@ class Tools:
         :return: Confirmation as JSON
         """
         try:
+            # Validate required parameters
+            if not src or not src.strip():
+                raise StorageError(
+                    "MISSING_PARAMETER",
+                    "Source path is required",
+                    hint="Specify the source file: shed_move_documents_to_storage(src, dest)"
+                )
+            if not dest or not dest.strip():
+                raise StorageError(
+                    "MISSING_PARAMETER",
+                    "Destination path is required",
+                    hint="Specify the destination: shed_move_documents_to_storage(src, dest)"
+                )
+
             user_root = self._core._get_user_root(__user__)
 
             # Validate paths with zone name check
@@ -5419,16 +5537,19 @@ class Tools:
 
             source = self._core._resolve_chroot_path(src_chroot, src)
             target = self._core._resolve_chroot_path(dest_chroot, dest)
-            
+
             if not source.exists():
                 raise StorageError("FILE_NOT_FOUND", f"File not found: {src}")
-            
+
+            if target.exists():
+                raise StorageError("FILE_EXISTS", f"Destination exists: {dest}")
+
             # Check quota (move requires temporary duplication)
             self._core._check_quota(__user__, self._core._get_path_size(source))
-            
+
             self._core._ensure_dir(dest_chroot)
             self._core._ensure_dir(target.parent)
-            
+
             # Copy to Storage
             if source.is_dir():
                 shutil.copytree(source, target)
@@ -5734,6 +5855,14 @@ class Tools:
             else:
                 src_zone_root = user_root / "Documents" / "data"
 
+            # Validate source is not empty
+            if not src or not src.strip():
+                raise StorageError(
+                    "MISSING_PARAMETER",
+                    "Source path is required",
+                    hint="Specify the ZIP file to extract: shed_unzip(zone, src, dest)"
+                )
+
             # Validate and resolve paths
             src = self._core._validate_relative_path(src, src_zone_name, allow_zone_in_path)
             src_path = self._core._resolve_chroot_path(src_zone_root, src)
@@ -5822,6 +5951,15 @@ class Tools:
                         f"ZIP compression ratio too high ({total_size // zip_size}:1)",
                         {"ratio": total_size / zip_size, "max_ratio": ZIP_MAX_COMPRESSION_RATIO},
                         "ZIP file may be a decompression bomb"
+                    )
+
+                # Final symlink check before extraction (TOCTOU protection)
+                if dest_path.is_symlink():
+                    raise StorageError(
+                        "PATH_ESCAPE",
+                        "Destination is a symlink",
+                        {"dest": str(dest_path)},
+                        "Cannot extract to a symlink target"
                     )
 
                 # Extract all files (safe after validation)
@@ -5926,6 +6064,14 @@ class Tools:
                 zone_root = user_root / "Documents" / "data"
                 zone_name = "Documents"
 
+            # Validate source is not empty
+            if not src or not src.strip():
+                raise StorageError(
+                    "MISSING_PARAMETER",
+                    "Source path is required",
+                    hint="Specify the file or folder to compress: shed_zip(zone, src, dest)"
+                )
+
             # Validate and resolve source path
             src = self._core._validate_relative_path(src, zone_name, allow_zone_in_path)
             src_path = self._core._resolve_chroot_path(zone_root, src)
@@ -5941,7 +6087,11 @@ class Tools:
                 dest_path = self._core._resolve_chroot_path(zone_root, dest)
             else:
                 dest_path = src_path.parent / (src_path.name + ".zip")
-            
+
+            # Check if destination exists
+            if dest_path.exists():
+                raise StorageError("FILE_EXISTS", f"Destination exists: {dest or dest_path.name}")
+
             # Check quota (estimate: same size as source)
             src_size = self._core._get_path_size(src_path)
             self._core._check_quota(__user__, src_size)
@@ -6031,38 +6181,10 @@ class Tools:
             shed_tree(zone="group", group="MyTeam", path="docs")
         """
         try:
-            user_root = self._core._get_user_root(__user__)
-            conv_id = self._core._get_conv_id(__metadata__)
-            zone_lower = zone.lower()
-            
-            # Validate zone
-            if zone_lower == "uploads":
-                zone_root = user_root / "Uploads" / conv_id
-                zone_name = "Uploads"
-            elif zone_lower == "storage":
-                zone_root = user_root / "Storage" / "data"
-                zone_name = "Storage"
-            elif zone_lower == "documents":
-                zone_root = user_root / "Documents" / "data"
-                zone_name = "Documents"
-            elif zone_lower == "group":
-                if not group:
-                    raise StorageError(
-                        "MISSING_PARAMETER",
-                        "Group name is required for zone='group'",
-                        hint="Use: shed_tree(zone='group', group='GroupName', path='...')"
-                    )
-                # Resolve group and check membership
-                group_id = self._core._validate_group_id(group)
-                self._core._check_group_access(__user__, group_id)
-                zone_root = self._core._get_group_data_path(group_id)
-                zone_name = f"Group:{group_id}"
-            else:
-                raise StorageError(
-                    "ZONE_FORBIDDEN",
-                    f"Invalid zone: {zone}",
-                    hint="Use 'uploads', 'storage', 'documents', or 'group'"
-                )
+            # Resolve zone using standard helper
+            ctx = self._core._resolve_zone(zone, group, __user__, __metadata__, require_write=False)
+            zone_root = ctx.zone_root
+            zone_name = ctx.zone_name
 
             if not zone_root.exists():
                 return self._core._format_response(True, data={"tree": "(empty)"}, message="Zone is empty")
@@ -6073,8 +6195,15 @@ class Tools:
             
             if not start_path.exists():
                 raise StorageError("FILE_NOT_FOUND", f"Path not found: {path}")
-            
-            # Clamp depth
+
+            # Validate and clamp depth
+            if depth < 0:
+                raise StorageError(
+                    "INVALID_PARAMETER",
+                    "Depth must be non-negative",
+                    {"depth": depth},
+                    "Use depth between 0 and 10"
+                )
             depth = max(1, min(depth, 10))
             
             # Build tree
@@ -6117,12 +6246,12 @@ class Tools:
                 return lines
             
             # Generate tree
-            root_name = start_path.name if path else (group if zone_lower == "group" else zone_lower.capitalize())
+            root_name = start_path.name if path else (group if ctx.zone_lower == "group" else ctx.zone_lower.capitalize())
             tree_lines = [f"{root_name}/"]
             tree_lines.extend(build_tree(start_path))
             tree_output = "\n".join(tree_lines)
-            
-            zone_display = f"Group:{group}" if zone_lower == "group" else zone_lower.capitalize()
+
+            zone_display = zone_name
             return self._core._format_response(
                 True,
                 data={"tree": tree_output, "depth": depth, "path": path or ".", "zone": zone_display},
@@ -6138,40 +6267,35 @@ class Tools:
         self,
         zone: str,
         path: str,
+        group: str = None,
         allow_zone_in_path: bool = False,
         __user__: dict = None,
         __metadata__: dict = None,
     ) -> str:
         """
         Shows ZIP archive contents and metadata (replaces missing 'zipinfo' command).
-        
-        :param zone: Target zone ("uploads", "storage", or "documents")
+
+        :param zone: Target zone ("uploads", "storage", "documents", or "group")
         :param path: Path to ZIP file
+        :param group: Group name (required if zone="group")
         :return: ZIP contents and metadata as JSON
-        
+
         Example:
             shed_zipinfo(zone="storage", path="backup.zip")
+            shed_zipinfo(zone="group", group="MyTeam", path="archive.zip")
         """
         try:
-            user_root = self._core._get_user_root(__user__)
-            zone_lower = zone.lower()
-            
-            # Validate zone
-            if zone_lower == "storage":
-                zone_root = user_root / "Storage" / "data"
-                zone_name = "Storage"
-            elif zone_lower == "documents":
-                zone_root = user_root / "Documents" / "data"
-                zone_name = "Documents"
-            elif zone_lower == "uploads":
-                conv_id = self._core._get_conv_id(__metadata__)
-                zone_root = user_root / "Uploads" / conv_id
-                zone_name = "Uploads"
-            else:
+            # Resolve zone using standard helper
+            ctx = self._core._resolve_zone(zone, group, __user__, __metadata__, require_write=False)
+            zone_root = ctx.zone_root
+            zone_name = ctx.zone_name
+
+            # Validate path is not empty
+            if not path or not path.strip():
                 raise StorageError(
-                    "ZONE_FORBIDDEN",
-                    f"Invalid zone: {zone}",
-                    hint="Use 'uploads', 'storage', or 'documents'"
+                    "MISSING_PARAMETER",
+                    "Path is required",
+                    hint="Specify the ZIP file: shed_zipinfo(zone, path)"
                 )
 
             # Validate and resolve path
@@ -6236,41 +6360,28 @@ class Tools:
         self,
         zone: str,
         path: str,
+        group: str = None,
         allow_zone_in_path: bool = False,
         __user__: dict = None,
         __metadata__: dict = None,
     ) -> str:
         """
         Identifies file MIME type (replaces missing 'file' command).
-        
-        :param zone: Target zone ("uploads", "storage", or "documents")
+
+        :param zone: Target zone ("uploads", "storage", "documents", or "group")
         :param path: Path to file
+        :param group: Group name (required if zone="group")
         :return: File type information as JSON
-        
+
         Example:
             shed_file_type(zone="storage", path="document.pdf")
+            shed_file_type(zone="group", group="MyTeam", path="data.csv")
         """
         try:
-            user_root = self._core._get_user_root(__user__)
-            conv_id = self._core._get_conv_id(__metadata__)
-            zone_lower = zone.lower()
-            
-            # Validate zone
-            if zone_lower == "uploads":
-                zone_root = user_root / "Uploads" / conv_id
-                zone_name = "Uploads"
-            elif zone_lower == "storage":
-                zone_root = user_root / "Storage" / "data"
-                zone_name = "Storage"
-            elif zone_lower == "documents":
-                zone_root = user_root / "Documents" / "data"
-                zone_name = "Documents"
-            else:
-                raise StorageError(
-                    "ZONE_FORBIDDEN",
-                    f"Invalid zone: {zone}",
-                    hint="Use 'uploads', 'storage', or 'documents'"
-                )
+            # Resolve zone using standard helper
+            ctx = self._core._resolve_zone(zone, group, __user__, __metadata__, require_write=False)
+            zone_root = ctx.zone_root
+            zone_name = ctx.zone_name
 
             # Validate and resolve path
             path = self._core._validate_relative_path(path, zone_name, allow_zone_in_path)
@@ -6364,39 +6475,29 @@ class Tools:
         zone: str,
         path: str,
         to: str = "unix",
+        group: str = None,
         allow_zone_in_path: bool = False,
         __user__: dict = None,
         __metadata__: dict = None,
     ) -> str:
         """
         Converts line endings (replaces missing 'dos2unix'/'unix2dos' commands).
-        
-        :param zone: Target zone ("storage" or "documents")
+
+        :param zone: Target zone ("storage", "documents", or "group")
         :param path: Path to text file
         :param to: Target format: "unix" (LF) or "dos" (CRLF)
+        :param group: Group name (required if zone="group")
         :return: Conversion result as JSON
-        
+
         Example:
             shed_convert_eol(zone="storage", path="script.sh", to="unix")
-            shed_convert_eol(zone="storage", path="readme.txt", to="dos")
+            shed_convert_eol(zone="group", group="MyTeam", path="readme.txt", to="dos")
         """
         try:
-            user_root = self._core._get_user_root(__user__)
-            zone_lower = zone.lower()
-            
-            # Validate zone (not uploads - read-only)
-            if zone_lower == "storage":
-                zone_root = user_root / "Storage" / "data"
-                zone_name = "Storage"
-            elif zone_lower == "documents":
-                zone_root = user_root / "Documents" / "data"
-                zone_name = "Documents"
-            else:
-                raise StorageError(
-                    "ZONE_FORBIDDEN",
-                    f"Invalid zone for writing: {zone}",
-                    hint="Use 'storage' or 'documents'"
-                )
+            # Resolve zone using standard helper (require_write=True rejects uploads)
+            ctx = self._core._resolve_zone(zone, group, __user__, __metadata__, require_write=True)
+            zone_root = ctx.zone_root
+            zone_name = ctx.zone_name
 
             # Validate target format
             to_lower = to.lower()
@@ -6460,9 +6561,9 @@ class Tools:
             
             # Write back
             file_path.write_bytes(new_content)
-            
-            # Git commit if Documents
-            if zone_lower == "documents":
+
+            # Git commit if configured for this zone
+            if ctx.git_commit:
                 self._core._git_commit(zone_root, f"Convert EOL to {target_format}: {path}")
             
             return self._core._format_response(
@@ -6488,43 +6589,30 @@ class Tools:
         path: str,
         offset: int = 0,
         length: int = 256,
+        group: str = None,
         allow_zone_in_path: bool = False,
         __user__: dict = None,
         __metadata__: dict = None,
     ) -> str:
         """
         Shows hexadecimal dump of file (replaces missing 'xxd'/'hexdump' commands).
-        
-        :param zone: Target zone ("uploads", "storage", or "documents")
+
+        :param zone: Target zone ("uploads", "storage", "documents", or "group")
         :param path: Path to file
         :param offset: Starting offset in bytes (default: 0)
         :param length: Number of bytes to display (default: 256, max: 4096)
+        :param group: Group name (required if zone="group")
         :return: Hex dump as text
-        
+
         Example:
             shed_hexdump(zone="storage", path="binary.dat", offset=0, length=128)
+            shed_hexdump(zone="group", group="MyTeam", path="data.bin")
         """
         try:
-            user_root = self._core._get_user_root(__user__)
-            conv_id = self._core._get_conv_id(__metadata__)
-            zone_lower = zone.lower()
-            
-            # Validate zone
-            if zone_lower == "uploads":
-                zone_root = user_root / "Uploads" / conv_id
-                zone_name = "Uploads"
-            elif zone_lower == "storage":
-                zone_root = user_root / "Storage" / "data"
-                zone_name = "Storage"
-            elif zone_lower == "documents":
-                zone_root = user_root / "Documents" / "data"
-                zone_name = "Documents"
-            else:
-                raise StorageError(
-                    "ZONE_FORBIDDEN",
-                    f"Invalid zone: {zone}",
-                    hint="Use 'uploads', 'storage', or 'documents'"
-                )
+            # Resolve zone using standard helper
+            ctx = self._core._resolve_zone(zone, group, __user__, __metadata__, require_write=False)
+            zone_root = ctx.zone_root
+            zone_name = ctx.zone_name
 
             # Validate and resolve path
             path = self._core._validate_relative_path(path, zone_name, allow_zone_in_path)
@@ -7372,45 +7460,17 @@ class Tools:
         try:
             if __user__ is None:
                 __user__ = {}
-            # Resolve zone and path
-            zone_lower = zone.lower()
-            user_root = self._core._get_user_root(__user__)
-            
-            if zone_lower == "uploads":
-                conv_id = self._core._get_conv_id(__metadata__)
-                chroot = user_root / "Uploads" / conv_id
-                zone_name = "Uploads"
-            elif zone_lower == "storage":
-                chroot = user_root / "Storage" / "data"
-                zone_name = "Storage"
-            elif zone_lower == "documents":
-                chroot = user_root / "Documents" / "data"
-                zone_name = "Documents"
-            elif zone_lower == "group":
-                if not group:
-                    raise StorageError(
-                        "MISSING_GROUP",
-                        "Group name required for group zone",
-                        {"zone": zone},
-                        "Provide group parameter: shed_link_create(zone='group', group='team', path='...')"
-                    )
-                group_id = self._core._validate_group_id(group)
-                self._core._check_group_access(__user__, group_id)
-                chroot = Path(self.valves.storage_base_path) / "groups" / group_id / "data"
-                zone_name = f"Group:{group_id}"
-            else:
-                raise StorageError(
-                    "INVALID_ZONE",
-                    f"Invalid zone: {zone}",
-                    {"zone": zone, "valid_zones": ["uploads", "storage", "documents", "group"]},
-                    "Use one of: uploads, storage, documents, group"
-                )
+
+            # Resolve zone using standard helper
+            ctx = self._core._resolve_zone(zone, group, __user__, __metadata__, require_write=False)
+            zone_root = ctx.zone_root
+            zone_name = ctx.zone_name
 
             # Validate path (check for zone prefix duplication)
             path = self._core._validate_relative_path(path, zone_name, allow_zone_in_path=False)
 
             # Resolve and validate path
-            filepath = self._core._resolve_chroot_path(chroot, path)
+            filepath = self._core._resolve_chroot_path(zone_root, path)
             
             if not filepath.exists():
                 raise StorageError(
@@ -8595,8 +8655,11 @@ shed_tree(zone="storage") # Directory tree
             # Resolve destination
             data_path = self._core._ensure_group_space(group)
             dest = self._core._resolve_chroot_path(data_path, dest_path)
-            
+
             # Check if destination exists
+            if dest.exists():
+                raise StorageError("FILE_EXISTS", f"Destination exists: {dest_path}")
+
             existing = self._core._get_file_ownership(group, dest_path)
             if existing:
                 can_write, error = self._core._can_write_group_file(group, dest_path, user_id)
