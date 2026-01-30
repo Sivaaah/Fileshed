@@ -3767,26 +3767,28 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
                 f"Invalid position: {position}. Valid: {', '.join(valid_positions)}{hint}"
             )
         
-        # Validate line parameter early - line=0 is explicitly invalid
-        if line is not None and line < 1:
-            raise StorageError("INVALID_PARAMETER", "Line must be >= 1 (first line is 1, not 0)")
+        # Skip line/end_line/pattern validation when overwrite=True (these params are ignored)
+        if not overwrite:
+            # Validate line parameter - line=0 is explicitly invalid
+            if line is not None and line < 1:
+                raise StorageError("INVALID_PARAMETER", "Line must be >= 1 (first line is 1, not 0)")
 
-        if end_line is not None and end_line < 1:
-            raise StorageError("INVALID_PARAMETER", "end_line must be >= 1 (first line is 1, not 0)")
+            if end_line is not None and end_line < 1:
+                raise StorageError("INVALID_PARAMETER", "end_line must be >= 1 (first line is 1, not 0)")
 
-        if not overwrite and position in ("before", "after", "replace"):
-            if line is None and pattern is None:
-                raise StorageError("MISSING_PARAMETER", f"Position '{position}' requires 'line' or 'pattern'")
-        
-        if end_line is not None and position != "replace":
-            raise StorageError("INVALID_PARAMETER", "end_line only valid with position='replace'")
-        
-        if end_line is not None and end_line < line:
-            raise StorageError("INVALID_PARAMETER", "end_line must be >= line")
-        
+            if position in ("before", "after", "replace"):
+                if line is None and pattern is None:
+                    raise StorageError("MISSING_PARAMETER", f"Position '{position}' requires 'line' or 'pattern'")
+
+            if end_line is not None and position != "replace":
+                raise StorageError("INVALID_PARAMETER", "end_line only valid with position='replace'")
+
+            if end_line is not None and end_line < line:
+                raise StorageError("INVALID_PARAMETER", "end_line must be >= line")
+
         # === COMPILE REGEX ===
         compiled_pattern = None
-        if pattern is not None:
+        if pattern is not None and not overwrite:
             if pattern == "":
                 raise StorageError("INVALID_PARAMETER", "Pattern cannot be empty")
             flags = 0
@@ -4128,7 +4130,8 @@ Note: stdout/stderr are truncated at 50KB to prevent context overflow.
         except FileNotFoundError:
             current_size = 0
 
-        if offset is not None and offset > current_size:
+        # Only validate offset bounds when it will actually be used
+        if offset is not None and position in ("at", "replace") and offset > current_size:
             raise StorageError("INVALID_PARAMETER", f"Offset {offset} beyond file size ({current_size})")
         
         bytes_removed = 0
@@ -5104,7 +5107,11 @@ class Tools:
             if not editzone_path.exists():
                 raise StorageError("NOT_IN_EDIT_MODE", f"File not open for editing: {path}",
                                    hint="Use shed_lockedit_open() first. Note: shed_lockedit_save() CLOSES edit mode!")
-            
+
+            # Validate content parameter
+            if content is None:
+                raise StorageError("MISSING_PARAMETER", "Content parameter is required")
+
             # Check content size
             self._core._validate_content_size(content)
             
@@ -6859,7 +6866,15 @@ class Tools:
             
             # Ensure parent directory exists
             db_path.parent.mkdir(parents=True, exist_ok=True)
-            
+
+            # Validate mutually exclusive parameters
+            if import_csv and query:
+                raise StorageError(
+                    "INVALID_PARAMETER",
+                    "Cannot use both 'import_csv' and 'query' parameters",
+                    hint="Use import_csv for CSV import OR query for SQL execution, not both"
+                )
+
             # =====================================================
             # CSV IMPORT MODE
             # =====================================================
