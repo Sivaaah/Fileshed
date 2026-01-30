@@ -1361,8 +1361,8 @@ shed_link_delete(file_id="abc123-...")
 For quick edits when you don't need locking:
 
 ```
-# Overwrite entire file
-shed_patch_text(zone="storage", path="file.txt", content="New content", overwrite=True)
+# Create or overwrite a file (simplest way!)
+shed_create_file(zone="storage", path="file.txt", content="New content")
 
 # Append to file
 shed_patch_text(zone="storage", path="file.txt", content="\\nNew line", position="end")
@@ -1371,11 +1371,7 @@ shed_patch_text(zone="storage", path="file.txt", content="\\nNew line", position
 shed_patch_text(zone="storage", path="config.py", content="DEBUG=False", pattern="DEBUG=True", position="replace")
 ```
 
-⚠️ `overwrite` is a PARAMETER (True/False), NOT a position value!
-```
-✅ CORRECT: shed_patch_text(..., overwrite=True)
-❌ WRONG:   shed_patch_text(..., position="overwrite")
-```
+💡 **Use `shed_create_file()` for creating files** - it's simpler than `shed_patch_text(..., overwrite=True)`
 
 ### WORKFLOW 2: Locked Edit (with locking)
 For concurrent access or when you need rollback:
@@ -1412,7 +1408,7 @@ shed_lockedit_save(...)
 
 | Task | Command |
 |------|---------|
-| Overwrite file | `shed_patch_text(..., overwrite=True)` |
+| Create/overwrite file | `shed_create_file(zone, path, content)` |
 | Append to file | `shed_patch_text(..., position="end")` |
 | Prepend to file | `shed_patch_text(..., position="start")` |
 | Insert before line N | `shed_patch_text(..., position="before", line=N)` |
@@ -3497,10 +3493,10 @@ Only use shed_patch_text() to CREATE or MODIFY file CONTENT.
 | Count lines        | shed_exec(zone="storage", cmd="wc", args=["-l", "file"])  |
 | Git operations     | shed_exec(zone="documents", cmd="git", args=["log"])      |
 
-CONTENT OPERATIONS (use shed_patch_text only for these):
+CONTENT OPERATIONS:
 | Operation              | Method                                                  |
 |------------------------|---------------------------------------------------------|
-| Create new file        | shed_patch_text(zone, path, content, overwrite=True)    |
+| Create new file        | shed_create_file(zone, path, content)                   |
 | Append to file         | shed_patch_text(zone, path, content, position="end")    |
 | Replace pattern        | shed_patch_text(zone, path, content, pattern="...", position="replace") |
 | Edit specific line     | shed_patch_text(zone, path, content, line=5, position="replace") |
@@ -4367,8 +4363,8 @@ class Tools:
     ║    • Delete: shed_exec(zone="storage", cmd="rm", args=["file.txt"])      ║
     ║    • Git:    shed_exec(zone="documents", cmd="git", args=["log"])        ║
     ║                                                                           ║
-    ║  Use shed_patch_text() ONLY for file CONTENT operations:                 ║
-    ║    • Create: shed_patch_text(zone, path, content, overwrite=True)        ║
+    ║  FILE CONTENT operations:                                                ║
+    ║    • Create: shed_create_file(zone, path, content)                       ║
     ║    • Append: shed_patch_text(zone, path, content, position="end")        ║
     ║                                                                           ║
     ║  ❌ WRONG: shed_patch_text(path="dir/.keep") to create directories        ║

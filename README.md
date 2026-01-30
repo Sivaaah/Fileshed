@@ -176,8 +176,8 @@ shed_exec(zone="storage", cmd="jq",
 ### Create and Edit Files
 
 ```python
-# Create a new file (overwrite=True to replace entire content)
-shed_patch_text(zone="storage", path="notes.txt", content="Hello world!", overwrite=True)
+# Create a new file (simplest way!)
+shed_create_file(zone="storage", path="notes.txt", content="Hello world!")
 
 # Append to a file
 shed_patch_text(zone="storage", path="log.txt", content="New entry\n", position="end")
@@ -200,8 +200,7 @@ shed_exec(zone="documents", cmd="git", args=["log", "--oneline", "-10"])
 shed_exec(zone="documents", cmd="git", args=["diff", "HEAD~1"])
 
 # Create a file with commit message
-shed_patch_text(zone="documents", path="report.md", content="# Report\n...", 
-                overwrite=True, message="Initial draft")
+shed_create_file(zone="documents", path="report.md", content="# Report\n...", message="Initial draft")
 ```
 
 ### Group Collaboration
@@ -214,8 +213,8 @@ shed_group_list()
 shed_exec(zone="group", group="team-alpha", cmd="ls", args=["-la"])
 
 # Create a shared file
-shed_patch_text(zone="group", group="team-alpha", path="shared.md", 
-                content="# Shared Notes\n", overwrite=True, message="Init")
+shed_create_file(zone="group", group="team-alpha", path="shared.md",
+                 content="# Shared Notes\n", message="Init")
 
 # Copy a file to a group
 shed_copy_to_group(src_zone="storage", src_path="report.pdf", 
