@@ -4618,7 +4618,7 @@ class Tools:
         except StorageError as e:
             return self._core._format_error(e, "shed_exec")
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
+            return self._core._format_response(False, message="Unexpected error during command execution")
 
     async def shed_patch_text(
         self,
@@ -4683,7 +4683,7 @@ class Tools:
         except StorageError as e:
             return self._core._format_error(e, "shed_patch_text")
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
+            return self._core._format_response(False, message="Unexpected error while editing text file")
 
     async def shed_patch_bytes(
         self,
@@ -4735,7 +4735,7 @@ class Tools:
         except StorageError as e:
             return self._core._format_error(e, "shed_patch_bytes")
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
+            return self._core._format_response(False, message="Unexpected error while editing binary file")
 
     async def shed_delete(
         self,
@@ -4827,7 +4827,7 @@ class Tools:
         except StorageError as e:
             return self._core._format_error(e, "shed_delete")
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
+            return self._core._format_response(False, message="Unexpected error while deleting file")
 
     async def shed_rename(
         self,
@@ -4916,7 +4916,7 @@ class Tools:
         except StorageError as e:
             return self._core._format_error(e, "shed_rename")
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
+            return self._core._format_response(False, message="Unexpected error while renaming file")
 
     async def shed_lockedit_open(
         self,
@@ -5019,7 +5019,7 @@ class Tools:
         except StorageError as e:
             return self._core._format_error(e, "shed_lockedit_open")
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
+            return self._core._format_response(False, message="Unexpected error while acquiring file lock")
 
     async def shed_lockedit_exec(
         self,
@@ -5102,7 +5102,7 @@ class Tools:
         except StorageError as e:
             return self._core._format_error(e, "shed_lockedit_exec")
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
+            return self._core._format_response(False, message="Unexpected error during locked file execution")
 
     async def shed_lockedit_overwrite(
         self,
@@ -5185,7 +5185,7 @@ class Tools:
         except StorageError as e:
             return self._core._format_error(e, "shed_lockedit_overwrite")
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
+            return self._core._format_response(False, message="Unexpected error while overwriting locked file")
 
     async def shed_lockedit_save(
         self,
@@ -5280,7 +5280,7 @@ class Tools:
         except StorageError as e:
             return self._core._format_error(e, "shed_lockedit_save")
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
+            return self._core._format_response(False, message="Unexpected error while saving locked file")
 
     async def shed_lockedit_cancel(
         self,
@@ -5347,7 +5347,7 @@ class Tools:
         except StorageError as e:
             return self._core._format_error(e, "shed_lockedit_cancel")
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
+            return self._core._format_response(False, message="Unexpected error while canceling file lock")
 
     async def shed_move_uploads_to_storage(
         self,
@@ -5397,8 +5397,8 @@ class Tools:
             if not source.exists():
                 raise StorageError(
                     "FILE_NOT_FOUND",
-                    f"File not found: {src}",
-                    {"path": src, "uploads_dir": str(src_chroot)},
+                    f"File not found in Uploads: {src}",
+                    {"path": src},
                     "Did you call shed_import(import_all=True) first? Files must be imported before moving."
                 )
 
@@ -5417,7 +5417,7 @@ class Tools:
         except StorageError as e:
             return self._core._format_error(e, "shed_move_uploads_to_storage")
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
+            return self._core._format_response(False, message="Unexpected error while moving file from Uploads to Storage")
     
     async def shed_move_uploads_to_documents(
         self,
@@ -5469,8 +5469,8 @@ class Tools:
             if not source.exists():
                 raise StorageError(
                     "FILE_NOT_FOUND",
-                    f"File not found: {src}",
-                    {"path": src, "uploads_dir": str(src_chroot)},
+                    f"File not found in Uploads: {src}",
+                    {"path": src},
                     "Did you call shed_import(import_all=True) first? Files must be imported before moving."
                 )
 
@@ -5496,7 +5496,7 @@ class Tools:
         except StorageError as e:
             return self._core._format_error(e, "shed_move_uploads_to_documents")
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
+            return self._core._format_response(False, message="Unexpected error while moving file from Uploads to Documents")
     
     async def shed_copy_storage_to_documents(
         self,
@@ -5572,7 +5572,7 @@ class Tools:
         except StorageError as e:
             return self._core._format_error(e, "shed_copy_storage_to_documents")
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
+            return self._core._format_response(False, message="Unexpected error while copying file from Storage to Documents")
     
     async def shed_move_documents_to_storage(
         self,
@@ -5650,7 +5650,7 @@ class Tools:
         except StorageError as e:
             return self._core._format_error(e, "shed_move_documents_to_storage")
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
+            return self._core._format_response(False, message="Unexpected error while moving file from Documents to Storage")
     
     # =========================================================================
     # UTILITIES (5 functions)
@@ -5859,9 +5859,9 @@ class Tools:
                 data=result_data,
                 message=f"Imported {len(imported)} file(s) to Uploads. Use shed_delete(zone='uploads', path='...') to remove."
             )
-            
+
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
+            return self._core._format_response(False, message="Unexpected error during file import")
     
     # =========================================================================
     # BUILTIN ZIP/UNZIP (Python zipfile - no external dependency)
@@ -6109,7 +6109,7 @@ class Tools:
         except zipfile.BadZipFile:
             return self._core._format_response(False, message="Invalid or corrupted ZIP file")
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
+            return self._core._format_response(False, message="Unexpected error during ZIP extraction")
     
     async def shed_zip(
         self,
@@ -6243,7 +6243,7 @@ class Tools:
         except StorageError as e:
             return self._core._format_error(e, "shed_zip")
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
+            return self._core._format_response(False, message="Unexpected error during ZIP creation")
 
     # =========================================================================
     # BUILTIN UTILITIES - Replace missing system commands (5 functions)
@@ -6353,7 +6353,7 @@ class Tools:
         except StorageError as e:
             return self._core._format_error(e, "shed_tree")
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
+            return self._core._format_response(False, message="Unexpected error while building directory tree")
     
     async def shed_zipinfo(
         self,
@@ -6457,7 +6457,7 @@ class Tools:
         except zipfile.BadZipFile:
             return self._core._format_response(False, message="Invalid or corrupted ZIP file")
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
+            return self._core._format_response(False, message="Unexpected error while reading ZIP info")
     
     async def shed_file_type(
         self,
@@ -6571,7 +6571,7 @@ class Tools:
         except StorageError as e:
             return self._core._format_error(e, "shed_file_type")
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
+            return self._core._format_response(False, message="Unexpected error while detecting file type")
     
     async def shed_convert_eol(
         self,
@@ -6692,7 +6692,7 @@ class Tools:
         except StorageError as e:
             return self._core._format_error(e, "shed_convert_eol")
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
+            return self._core._format_response(False, message="Unexpected error during line ending conversion")
     
     async def shed_hexdump(
         self,
@@ -6816,7 +6816,7 @@ class Tools:
         except StorageError as e:
             return self._core._format_error(e, "shed_hexdump")
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
+            return self._core._format_response(False, message="Unexpected error during hexdump")
 
     async def shed_sqlite(
         self,
@@ -7588,7 +7588,7 @@ class Tools:
         except StorageError as e:
             return self._core._format_error(e, "shed_sqlite")
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred in shed_sqlite")
+            return self._core._format_response(False, message="Unexpected error during SQLite operation")
 
     # =========================================================================
     # DOWNLOAD LINKS (3 functions)
@@ -7736,7 +7736,7 @@ class Tools:
         except StorageError as e:
             return self._core._format_error(e, "shed_link_create")
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
+            return self._core._format_response(False, message="Unexpected error while creating download link")
 
     async def shed_link_list(
         self,
@@ -7818,7 +7818,7 @@ class Tools:
         except StorageError as e:
             return self._core._format_error(e, "shed_link_list")
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
+            return self._core._format_response(False, message="Unexpected error while listing download links")
 
     async def shed_link_delete(
         self,
@@ -7918,7 +7918,7 @@ class Tools:
         except StorageError as e:
             return self._core._format_error(e, "shed_link_delete")
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
+            return self._core._format_response(False, message="Unexpected error while deleting download link")
 
     # =========================================================================
     # HOWTO GUIDES (targeted help to avoid context pollution)
@@ -8117,10 +8117,10 @@ shed_tree(zone="storage") # Directory tree
             }
             
             return self._core._format_response(True, data=stats)
-            
+
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
-    
+            return self._core._format_response(False, message="Unexpected error while calculating storage stats")
+
     async def shed_parameters(
         self,
         __user__: dict = None,
@@ -8176,10 +8176,10 @@ shed_tree(zone="storage") # Directory tree
             }
             
             return self._core._format_response(True, data=params, message="Current valve configuration")
-            
+
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
-    
+            return self._core._format_response(False, message="Unexpected error while getting parameters")
+
     async def shed_allowed_commands(
         self,
         __user__: dict = None,
@@ -8256,10 +8256,10 @@ shed_tree(zone="storage") # Directory tree
             
             self._core._commands_cache = result
             return self._core._format_response(True, data=result)
-            
+
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
-    
+            return self._core._format_response(False, message="Unexpected error while listing allowed commands")
+
     async def shed_force_unlock(
         self,
         zone: str = "",
@@ -8347,7 +8347,7 @@ shed_tree(zone="storage") # Directory tree
         except StorageError as e:
             return self._core._format_error(e, "shed_force_unlock")
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
+            return self._core._format_response(False, message="Unexpected error while forcing unlock")
     
     async def shed_maintenance(
         self,
@@ -8454,10 +8454,10 @@ shed_tree(zone="storage") # Directory tree
                 data=cleaned,
                 message=f"Maintenance complete: {total} element(s) cleaned"
             )
-            
+
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
-    
+            return self._core._format_response(False, message="Unexpected error during maintenance cleanup")
+
     # =========================================================================
     # GROUP FUNCTIONS (14 functions)
     # =========================================================================
@@ -8510,7 +8510,7 @@ shed_tree(zone="storage") # Directory tree
         except StorageError as e:
             return self._core._format_error(e, "shed_group_list")
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
+            return self._core._format_response(False, message="Unexpected error while listing groups")
     
     async def shed_group_info(
         self,
@@ -8598,7 +8598,7 @@ shed_tree(zone="storage") # Directory tree
         except StorageError as e:
             return self._core._format_error(e, "shed_group_info")
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
+            return self._core._format_response(False, message="Unexpected error while getting group info")
     
     # --- Operations (4) ---
     
@@ -8663,7 +8663,7 @@ shed_tree(zone="storage") # Directory tree
         except StorageError as e:
             return self._core._format_error(e, "shed_group_set_mode")
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
+            return self._core._format_response(False, message="Unexpected error while setting group mode")
     
     async def shed_group_chown(
         self,
@@ -8737,7 +8737,7 @@ shed_tree(zone="storage") # Directory tree
         except StorageError as e:
             return self._core._format_error(e, "shed_group_chown")
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
+            return self._core._format_response(False, message="Unexpected error while changing file ownership")
     
     # --- Bridge (1) ---
     
@@ -8864,4 +8864,4 @@ shed_tree(zone="storage") # Directory tree
         except StorageError as e:
             return self._core._format_error(e, "shed_copy_to_group")
         except Exception:
-            return self._core._format_response(False, message="An unexpected error occurred")
+            return self._core._format_response(False, message="Unexpected error while copying to group")
