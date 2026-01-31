@@ -7244,11 +7244,15 @@ class Tools:
 
                 try:
                     # Apply journal mode from valve (DELETE is safer for NFS)
-                    journal_mode = self.valves.sqlite_journal_mode.upper()
-                    if journal_mode in ("WAL", "DELETE", "TRUNCATE", "MEMORY"):
-                        conn.execute(f"PRAGMA journal_mode={journal_mode}")
-                    else:
-                        conn.execute("PRAGMA journal_mode=WAL")
+                    # Wrapped in try-except because PRAGMA fails on non-database files
+                    try:
+                        journal_mode = self.valves.sqlite_journal_mode.upper()
+                        if journal_mode in ("WAL", "DELETE", "TRUNCATE", "MEMORY"):
+                            conn.execute(f"PRAGMA journal_mode={journal_mode}")
+                        else:
+                            conn.execute("PRAGMA journal_mode=WAL")
+                    except sqlite3.Error:
+                        pass  # Ignore journal mode errors (e.g., non-database files)
 
                     cursor = conn.cursor()
 
@@ -7665,11 +7669,15 @@ class Tools:
 
             try:
                 # Apply journal mode from valve (DELETE is safer for NFS)
-                journal_mode = self.valves.sqlite_journal_mode.upper()
-                if journal_mode in ("WAL", "DELETE", "TRUNCATE", "MEMORY"):
-                    conn.execute(f"PRAGMA journal_mode={journal_mode}")
-                else:
-                    conn.execute("PRAGMA journal_mode=WAL")
+                # Wrapped in try-except because PRAGMA fails on non-database files
+                try:
+                    journal_mode = self.valves.sqlite_journal_mode.upper()
+                    if journal_mode in ("WAL", "DELETE", "TRUNCATE", "MEMORY"):
+                        conn.execute(f"PRAGMA journal_mode={journal_mode}")
+                    else:
+                        conn.execute("PRAGMA journal_mode=WAL")
+                except sqlite3.Error:
+                    pass  # Ignore journal mode errors (e.g., non-database files)
 
                 cursor = conn.cursor()
                 cursor.execute(query, params)
