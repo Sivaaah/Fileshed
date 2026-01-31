@@ -7241,14 +7241,15 @@ class Tools:
                     pass
                 
                 conn = sqlite3.connect(str(db_path), timeout=30.0)
-                # Apply journal mode from valve (DELETE is safer for NFS)
-                journal_mode = self.valves.sqlite_journal_mode.upper()
-                if journal_mode in ("WAL", "DELETE", "TRUNCATE", "MEMORY"):
-                    conn.execute(f"PRAGMA journal_mode={journal_mode}")
-                else:
-                    conn.execute("PRAGMA journal_mode=WAL")
 
                 try:
+                    # Apply journal mode from valve (DELETE is safer for NFS)
+                    journal_mode = self.valves.sqlite_journal_mode.upper()
+                    if journal_mode in ("WAL", "DELETE", "TRUNCATE", "MEMORY"):
+                        conn.execute(f"PRAGMA journal_mode={journal_mode}")
+                    else:
+                        conn.execute("PRAGMA journal_mode=WAL")
+
                     cursor = conn.cursor()
 
                     # Check if table exists
@@ -7660,15 +7661,16 @@ class Tools:
             # Execute the query
             params = params or []
             conn = sqlite3.connect(str(db_path), timeout=10.0)
-            # Apply journal mode from valve (DELETE is safer for NFS)
-            journal_mode = self.valves.sqlite_journal_mode.upper()
-            if journal_mode in ("WAL", "DELETE", "TRUNCATE", "MEMORY"):
-                conn.execute(f"PRAGMA journal_mode={journal_mode}")
-            else:
-                conn.execute("PRAGMA journal_mode=WAL")
             conn.row_factory = sqlite3.Row
 
             try:
+                # Apply journal mode from valve (DELETE is safer for NFS)
+                journal_mode = self.valves.sqlite_journal_mode.upper()
+                if journal_mode in ("WAL", "DELETE", "TRUNCATE", "MEMORY"):
+                    conn.execute(f"PRAGMA journal_mode={journal_mode}")
+                else:
+                    conn.execute("PRAGMA journal_mode=WAL")
+
                 cursor = conn.cursor()
                 cursor.execute(query, params)
                 
