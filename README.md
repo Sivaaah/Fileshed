@@ -24,7 +24,7 @@ Fileshed gives your LLM a persistent workspace. It provides:
 - 📂 **Persistent storage** — Files survive across conversations
 - 🗃️ **Structured data** — Built-in SQLite databases, surgical file edits by line or pattern
 - 🔄 **Convert data** — ffmpeg for media, pandoc for document conversion (markdown, docx, html, LaTeX source...)
-- 📝 **Examine and modify files** — cat, touch, mkdir, rm, cp, mv, tar, gzip, zip, xxd... Work in text and binary mode
+- 📝 **Examine and modify files** — cat, touch, mkdir, rm, cp, mv, tar, gzip, zip, od... Work in text and binary mode
 - 🛡️ **Integrity** — Automatic Git versioning, safe editing with file locks
 - 🌐 **Network I/O** (optional) — Download files and clone repositories (disabled by default, admin-controlled)
 - 🧠 **Context-efficient operations** — Process files without loading them into the conversation (grep, sed, awk, curl...)
