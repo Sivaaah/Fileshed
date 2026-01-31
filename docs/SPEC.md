@@ -527,7 +527,7 @@ All functions return JSON with consistent structure:
 
 ## Design Rationale
 
-This section documents deliberate design decisions and their justifications. It helps auditors understand intentional trade-offs and avoid false positives.
+This section documents deliberate design decisions and their justifications. It helps reviewers understand intentional trade-offs and avoid false positives.
 
 ### General Principles
 
@@ -644,6 +644,11 @@ sqlite_journal_mode = "delete"
 ```
 
 WAL mode uses memory-mapped files (`-shm`) which are unreliable on NFS.
+
+Alternative modes:
+- `delete` — Recommended for NFS, uses traditional rollback journal
+- `truncate` — Similar to delete, slightly faster on some filesystems
+- `memory` — Journal in RAM only (⚠️ data loss risk on crash)
 
 ### Limitations
 

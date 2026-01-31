@@ -1819,6 +1819,22 @@ shed_exec(zone="storage", cmd="some_cmd", args=["..."],
         """Returns the SQLite database path."""
         return Path(self.valves.storage_base_path) / "access_auth.sqlite"
 
+    def _apply_sqlite_journal_mode(self, conn) -> None:
+        """
+        Apply configured journal mode to SQLite connection.
+
+        Uses the sqlite_journal_mode valve. Falls back to WAL if invalid.
+        Silently ignores errors (e.g., non-database files).
+        """
+        try:
+            mode = self.valves.sqlite_journal_mode.upper()
+            if mode in ("WAL", "DELETE", "TRUNCATE", "MEMORY"):
+                conn.execute(f"PRAGMA journal_mode={mode}")
+            else:
+                conn.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.Error:
+            pass  # Ignore journal mode errors (e.g., non-database files)
+
     def _strip_sql_comments(self, sql: str) -> str:
         """
         Strips SQL comments from a query string.
@@ -3196,11 +3212,7 @@ shed_exec(zone="storage", cmd="some_cmd", args=["..."],
             conn.execute("CREATE INDEX IF NOT EXISTS idx_ownership_owner ON file_ownership(owner_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_ownership_path ON file_ownership(group_id, file_path)")
             # Set journal mode (WAL by default, but DELETE is safer for NFS)
-            journal_mode = self.valves.sqlite_journal_mode.upper()
-            if journal_mode in ("WAL", "DELETE", "TRUNCATE", "MEMORY"):
-                conn.execute(f"PRAGMA journal_mode={journal_mode}")
-            else:
-                conn.execute("PRAGMA journal_mode=WAL")
+            self._apply_sqlite_journal_mode(conn)
             conn.commit()
         finally:
             conn.close()
@@ -7244,15 +7256,7 @@ class Tools:
 
                 try:
                     # Apply journal mode from valve (DELETE is safer for NFS)
-                    # Wrapped in try-except because PRAGMA fails on non-database files
-                    try:
-                        journal_mode = self.valves.sqlite_journal_mode.upper()
-                        if journal_mode in ("WAL", "DELETE", "TRUNCATE", "MEMORY"):
-                            conn.execute(f"PRAGMA journal_mode={journal_mode}")
-                        else:
-                            conn.execute("PRAGMA journal_mode=WAL")
-                    except sqlite3.Error:
-                        pass  # Ignore journal mode errors (e.g., non-database files)
+                    self._core._apply_sqlite_journal_mode(conn)
 
                     cursor = conn.cursor()
 
@@ -7669,15 +7673,7 @@ class Tools:
 
             try:
                 # Apply journal mode from valve (DELETE is safer for NFS)
-                # Wrapped in try-except because PRAGMA fails on non-database files
-                try:
-                    journal_mode = self.valves.sqlite_journal_mode.upper()
-                    if journal_mode in ("WAL", "DELETE", "TRUNCATE", "MEMORY"):
-                        conn.execute(f"PRAGMA journal_mode={journal_mode}")
-                    else:
-                        conn.execute("PRAGMA journal_mode=WAL")
-                except sqlite3.Error:
-                    pass  # Ignore journal mode errors (e.g., non-database files)
+                self._core._apply_sqlite_journal_mode(conn)
 
                 cursor = conn.cursor()
                 cursor.execute(query, params)
