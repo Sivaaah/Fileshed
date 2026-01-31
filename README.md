@@ -6,10 +6,10 @@
 
 **Store, organize, collaborate, and share files across conversations.**
 
-[![Version](https://img.shields.io/badge/version-1.0.3-blue.svg)]()
+[![Version](https://img.shields.io/badge/version-1.0.4-blue.svg)]()
 [![Open WebUI](https://img.shields.io/badge/Open%20WebUI-Tool-green.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-lightgrey.svg)]()
-[![Tests](https://img.shields.io/badge/tests-1101%20passed-brightgreen.svg)](docs/audits/fileshed/reports/Exec_tests.md)
+[![Tests](https://img.shields.io/badge/tests-1195%20passed-brightgreen.svg)](docs/audits/fileshed/reports/Exec_tests.md)
 [![Audited](https://img.shields.io/badge/audited-★★★★☆-blue.svg)](#testing--audits)
 
 ---
