@@ -4733,43 +4733,47 @@ class Tools:
             shed_create_file(zone="storage", path="data.bin", content="48454C4C4F", file_type="bytes")
             shed_create_file(zone="storage", path="img.png", content="iVBORw0K...", file_type="bytes", content_format="base64")
         """
-        # Validate file_type
-        file_type_lower = file_type.lower() if isinstance(file_type, str) else ""
-        if file_type_lower not in ("text", "bytes"):
-            return self._core._format_response(
-                False,
-                error="INVALID_PARAMETER",
-                message=f"file_type must be 'text' or 'bytes', got: {repr(file_type)}",
-                hint="Use file_type='text' for text files or file_type='bytes' for binary"
-            )
-
-        # Delegate to appropriate patch function with overwrite=True
-        if file_type_lower == "bytes":
-            result = await self.shed_patch_bytes(
-                zone=zone, path=path, content=content,
-                content_format=content_format, overwrite=True,
-                group=group, message=message, mode=mode,
-                allow_zone_in_path=allow_zone_in_path,
-                __user__=__user__, __metadata__=__metadata__,
-            )
-        else:
-            result = await self.shed_patch_text(
-                zone=zone, path=path, content=content,
-                overwrite=True, group=group, message=message, mode=mode,
-                allow_zone_in_path=allow_zone_in_path,
-                __user__=__user__, __metadata__=__metadata__,
-            )
-
-        # Add hint explaining this is a wrapper function
         try:
-            import json
-            parsed = json.loads(result)
-            if parsed.get("success"):
-                parsed["hint"] = "shed_create_file is a wrapper for shed_patch_text/bytes with overwrite=True. It exists because it's intuitive to find and use."
-                return json.dumps(parsed)
-        except (json.JSONDecodeError, TypeError):
-            pass
-        return result
+            # Validate file_type
+            file_type_lower = file_type.lower() if isinstance(file_type, str) else ""
+            if file_type_lower not in ("text", "bytes"):
+                raise StorageError(
+                    "INVALID_PARAMETER",
+                    f"file_type must be 'text' or 'bytes', got: {repr(file_type)}",
+                    hint="Use file_type='text' for text files or file_type='bytes' for binary"
+                )
+
+            # Delegate to appropriate patch function with overwrite=True
+            if file_type_lower == "bytes":
+                result = await self.shed_patch_bytes(
+                    zone=zone, path=path, content=content,
+                    content_format=content_format, overwrite=True,
+                    group=group, message=message, mode=mode,
+                    allow_zone_in_path=allow_zone_in_path,
+                    __user__=__user__, __metadata__=__metadata__,
+                )
+            else:
+                result = await self.shed_patch_text(
+                    zone=zone, path=path, content=content,
+                    overwrite=True, group=group, message=message, mode=mode,
+                    allow_zone_in_path=allow_zone_in_path,
+                    __user__=__user__, __metadata__=__metadata__,
+                )
+
+            # Add hint explaining this is a wrapper function
+            try:
+                import json
+                parsed = json.loads(result)
+                if parsed.get("success"):
+                    parsed["hint"] = "shed_create_file is a wrapper for shed_patch_text/bytes with overwrite=True. It exists because it's intuitive to find and use."
+                    return json.dumps(parsed)
+            except (json.JSONDecodeError, TypeError):
+                pass
+            return result
+        except StorageError as e:
+            return self._core._format_error(e, "shed_create_file")
+        except Exception:
+            return self._core._format_response(False, message="Unexpected error while creating file")
 
     async def shed_patch_text(
         self,
