@@ -366,7 +366,7 @@ Compression: `gzip`, `gunzip`, `bzip2`, `bunzip2`, `xz`, `unxz`, `lz4`, `zstd`
 Checksums: `sum`
 Encoding: `uuencode`, `uudecode`
 File modification: `touch`, `mkdir`, `rm`, `rmdir`, `mv`, `cp`, `truncate`, `mktemp`, `install`, `shred`, `rename`
-Permissions: `chmod`
+Permissions: *(removed - no legitimate use case, security risk)*
 Document conversion: `pandoc`, `dos2unix`, `unix2dos`, `recode`
 Misc: `seq`, `date`, `cal`, `readlink`, `pathchk`, `pwd`, `uname`, `nproc`, `sleep`, `yes`, `tee`, `gettext`, `tsort`, `true`, `false`
 Media: `ffmpeg`, `magick`, `convert`
@@ -655,6 +655,110 @@ Alternative modes:
 - **Multi-instance not supported:** File locks (`O_EXCL`) and Git locks (`flock`) do not work reliably across multiple NFS clients
 - **Quota precision:** File size calculations may be slightly stale due to NFS caching
 - **Performance:** Network latency affects all file operations
+
+---
+
+## User Encryption
+
+Fileshed supports optional per-user encryption to protect files at rest against unauthorized storage access (disk theft, backup leaks, etc.).
+
+### Threat Model
+
+| Protected Against | Not Protected Against |
+|-------------------|----------------------|
+| Attacker with storage access | Malicious admin with code access |
+| Database file theft | Key interception at runtime |
+| Backup data leaks | Compromised user session |
+
+**Trade-off accepted:** An administrator with code access could technically intercept keys at runtime. This is acceptable for the use case of protecting against storage-level attacks.
+
+### Architecture: KEK/DEK
+
+Fileshed uses a two-layer key architecture:
+
+```
+User Key (32 bytes, base64) ──► Argon2id ──► KEK ──► Encrypts DEK
+                                              │
+                                              ▼
+                              DEK (stored encrypted in DB)
+                                              │
+                                              ▼
+                              Files encrypted with AES-256-GCM
+```
+
+- **KEK (Key Encryption Key):** Derived from user's key using Argon2id
+- **DEK (Data Encryption Key):** Random 32-byte key, encrypted and stored in database
+- **File encryption:** AES-256-GCM with per-file random nonce
+
+### Setup Flow
+
+1. User runs `shed_encryption_setup()` → system generates random key
+2. Key displayed ONCE → user saves to password manager
+3. User pastes key in User Valves (Tools > Fileshed > Settings)
+4. User runs `shed_encryption_migrate()` to encrypt existing files
+
+### Encryption Functions
+
+| Function | Description |
+|----------|-------------|
+| `shed_encryption_setup()` | Generate key, enable encryption |
+| `shed_encryption_disable(confirm=True)` | Decrypt all files, disable encryption |
+| `shed_encryption_status()` | Check encryption status and file counts |
+| `shed_encryption_migrate()` | Encrypt existing unencrypted files |
+
+### Reading/Writing Encrypted Files
+
+| Function | Behavior |
+|----------|----------|
+| `shed_read()` | Auto-detect and decrypt text files |
+| `shed_read_bytes()` | Auto-detect and decrypt binary files |
+| `shed_patch_text()` | Encrypt if DEK available or file already encrypted |
+| `shed_patch_bytes()` | Encrypt if DEK available or file already encrypted |
+| `shed_exec(cmd="cat")` | Shows encrypted content (use shed_read instead) |
+
+### File Format
+
+Encrypted files have a magic header:
+
+```
+FILESHED_ENC_V1\x00 (16 bytes) + Nonce (12 bytes) + Ciphertext + Tag (16 bytes)
+```
+
+### Database Schema
+
+```sql
+CREATE TABLE user_encryption (
+    user_id TEXT PRIMARY KEY,
+    encrypted_dek BLOB NOT NULL,
+    dek_nonce BLOB NOT NULL,
+    kek_salt BLOB NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+```
+
+### Security Parameters
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| Argon2id time_cost | 3 | Iterations |
+| Argon2id memory_cost | 65536 | 64 MB memory |
+| Argon2id parallelism | 4 | Threads |
+| AES-GCM nonce | 12 bytes | Per-file random |
+| AES-GCM tag | 16 bytes | Authentication |
+
+### Limitations
+
+- **Key loss = data loss:** No recovery mechanism
+- **User encryption only:** Group files are not encrypted
+- **Runtime key exposure:** Key passes through Open WebUI
+- **Performance overhead:** Encryption adds processing time
+- **`shed_exec` bypass:** Commands like `cat` see encrypted bytes
+
+### Requirements
+
+- Python package: `cryptography`
+- Install: `pip install cryptography`
 
 ---
 
